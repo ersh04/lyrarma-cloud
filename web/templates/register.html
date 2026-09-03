@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ t("register") }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<div class="auth-wrap">
+  <div class="card auth-card">
+
+    <h1 class="card__title">{{ t("create_account") }}</h1>
+    <p class="card__subtitle">{{ t("register_subtitle") }}</p>
+
+    {% if error %}
+      <div class="alert alert--error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/register" class="form">
+
+      <div class="form__group">
+        <label class="form__label" for="username">{{ t("username") }}</label>
+        <input
+          class="form__input"
+          type="text"
+          id="username"
+          name="username"
+          placeholder="alice"
+          required
+          autocomplete="username"
+          minlength="3"
+        />
+        <span class="form__hint">{{ t("min_3") }}</span>
+      </div>
+
+      <div class="form__group">
+        <label class="form__label" for="password">{{ t("password") }}</label>
+        <input
+          class="form__input"
+          type="password"
+          id="password"
+          name="password"
+          placeholder="••••••••"
+          required
+          autocomplete="new-password"
+          minlength="8"
+        />
+        <span class="form__hint">{{ t("min_8") }}</span>
+      </div>
+
+      <div class="form__group">
+        <label class="form__label" for="password_confirm">{{ t("confirm_password") }}</label>
+        <input
+          class="form__input"
+          type="password"
+          id="password_confirm"
+          name="password_confirm"
+          placeholder="••••••••"
+          required
+          autocomplete="new-password"
+          minlength="8"
+        />
+      </div>
+
+      <div class="form__group">
+        <label class="form__label" for="beta_key">{{ t("beta_key") }}</label>
+        <input
+          class="form__input"
+          type="text"
+          id="beta_key"
+          name="beta_key"
+          placeholder="{{ t('beta_key_placeholder') }}"
+          required
+          autocomplete="off"
+        />
+        <span class="form__hint">{{ t("beta_key_hint") }}</span>
+      </div>
+
+      <button type="submit" class="btn btn--primary btn--full">
+        {{ t("signup") }}
+      </button>
+
+    </form>
+
+    <p class="auth-card__footer">
+      {{ t("have_account") }} <a href="/login">{{ t("login_link") }}</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ t("shared_folder_title") }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<section class="shared-page">
+  <article class="shared-card">
+    <div class="shared-card__badge">{{ t("shared_folder_badge") }}</div>
+    <h1 class="shared-card__title">{{ folder.name }}</h1>
+
+    {% if error %}
+      <div class="alert alert--error">{{ error }}</div>
+    {% endif %}
+
+    <div class="shared-meta">
+      <div class="shared-meta__item">
+        <span class="shared-meta__label">URL</span>
+        <span class="shared-meta__value shared-meta__value--truncate">{{ share_url }}</span>
+      </div>
+    </div>
+
+    {% if folder.available %}
+      <div class="alert alert--success">{{ t("shared_folder_downloadable") }}</div>
+    {% endif %}
+
+    <div class="shared-actions">
+      <a href="{{ download_folder_url }}" class="btn btn--primary">{{ t("download_folder") }}</a>
+      <a href="{{ open_dashboard_url }}" class="btn btn--outline">{{ t("open_dashboard") }}</a>
+      <button
+        type="button"
+        class="btn btn--outline"
+        id="copySharedFolderLinkBtn"
+        data-copy-label="{{ t('copy_link') }}"
+        data-copied-label="{{ t('copied') }}"
+        data-copy-failed-label="{{ t('copy_failed') }}"
+      >{{ t("copy_link") }}</button>
+    </div>
+
+    <p class="shared-note">{{ t("shared_folder_note") }}</p>
+  </article>
+</section>
+
+<script>
+(function () {
+  const copyBtn = document.getElementById("copySharedFolderLinkBtn");
+  if (!copyBtn) {
+    return;
+  }
+
+  copyBtn.addEventListener("click", async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      copyBtn.textContent = copyBtn.dataset.copiedLabel;
+      setTimeout(() => {
+        copyBtn.textContent = copyBtn.dataset.copyLabel;
+      }, 1200);
+    } catch (_) {
+      copyBtn.textContent = copyBtn.dataset.copyFailedLabel;
+      setTimeout(() => {
+        copyBtn.textContent = copyBtn.dataset.copyLabel;
+      }, 1200);
+    }
+  });
+})();
+</script>
+{% endblock %}

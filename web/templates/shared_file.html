@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ t("shared_file_title") }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<section class="shared-page">
+  <article class="shared-card">
+    <div class="shared-card__badge">{{ t("shared_file_badge") }}</div>
+    <h1 class="shared-card__title">{{ file.name }}</h1>
+
+    {% if error %}
+      <div class="alert alert--error">{{ error }}</div>
+    {% endif %}
+
+    <div class="shared-meta">
+      <div class="shared-meta__item">
+        <span class="shared-meta__label">{{ t("type") }}</span>
+        <span class="shared-meta__value">{{ file.content_type }}</span>
+      </div>
+      <div class="shared-meta__item">
+        <span class="shared-meta__label">{{ t("size") }}</span>
+        <span class="shared-meta__value">
+          {% if file.available %}
+            {{ filesize(file.size) }}
+          {% else %}
+            {{ t("unknown") }}
+          {% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="shared-actions">
+      <a href="{{ download_url }}" class="btn btn--primary {% if not file.available %}shared-actions__btn--disabled{% endif %}">
+        {{ t("download_file") }}
+      </a>
+      <button
+        type="button"
+        class="btn btn--outline"
+        id="copySharedFileLinkBtn"
+        data-copy-label="{{ t('copy_link') }}"
+        data-copied-label="{{ t('copied') }}"
+        data-copy-failed-label="{{ t('copy_failed') }}"
+      >{{ t("copy_link") }}</button>
+    </div>
+
+    <p class="shared-note">{{ t("shared_file_note") }}</p>
+  </article>
+</section>
+
+<script>
+(function () {
+  const copyBtn = document.getElementById("copySharedFileLinkBtn");
+  if (!copyBtn) {
+    return;
+  }
+
+  copyBtn.addEventListener("click", async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      copyBtn.textContent = copyBtn.dataset.copiedLabel;
+      setTimeout(() => {
+        copyBtn.textContent = copyBtn.dataset.copyLabel;
+      }, 1200);
+    } catch (_) {
+      copyBtn.textContent = copyBtn.dataset.copyFailedLabel;
+      setTimeout(() => {
+        copyBtn.textContent = copyBtn.dataset.copyLabel;
+      }, 1200);
+    }
+  });
+})();
+</script>
+{% endblock %}

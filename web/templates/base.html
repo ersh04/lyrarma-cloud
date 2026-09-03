@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ t("site_name") }}{% endblock %}</title>
+  <meta name="theme-color" content="#0f0e19" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="page-shell {% block body_class %}{% endblock %}">
+
+  {# ── Site header ─────────────────────────────────────────────────────────── #}
+  <header class="header">
+    <div class="header__inner">
+      <a href="/" class="header__logo">
+        <span class="header__logo-mark">✦</span>
+        <span>{{ t("site_name") }}</span>
+      </a>
+      {% if authenticated %}
+        {# Navigation for authenticated users #}
+        <nav class="header__nav">
+          <div class="lang-switch" title="{{ t("language") }}">
+            <a href="/set-language/ru?next={{ language_next }}" class="lang-switch__link {% if lang == "ru" %}lang-switch__link--active{% endif %}" data-lang="ru">RU</a>
+            <span class="lang-switch__sep">/</span>
+            <a href="/set-language/en?next={{ language_next }}" class="lang-switch__link {% if lang == "en" %}lang-switch__link--active{% endif %}" data-lang="en">EN</a>
+          </div>
+          <span class="header__user">👤 {{ username }}</span>
+          <a href="/logout" class="btn btn--outline btn--sm">{{ t("logout") }}</a>
+        </nav>
+      {% else %}
+        {# Navigation for guests #}
+        <nav class="header__nav">
+          <div class="lang-switch" title="{{ t("language") }}">
+            <a href="/set-language/ru?next={{ language_next }}" class="lang-switch__link {% if lang == "ru" %}lang-switch__link--active{% endif %}" data-lang="ru">RU</a>
+            <span class="lang-switch__sep">/</span>
+            <a href="/set-language/en?next={{ language_next }}" class="lang-switch__link {% if lang == "en" %}lang-switch__link--active{% endif %}" data-lang="en">EN</a>
+          </div>
+          <a href="/login" class="btn btn--outline btn--sm">{{ t("login") }}</a>
+          <a href="/register" class="btn btn--primary btn--sm">{{ t("register") }}</a>
+        </nav>
+      {% endif %}
+    </div>
+  </header>
+
+  {# ── Main page content ─────────────────────────────────────────── #}
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  {# ── Footer ───────────────────────────────────────────────────────────────── #}
+  <footer class="footer">
+    <p>{{ t("copyright") }}</p>
+  </footer>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", async () => {
+        const swVersion = "v4";
+
+        try {
+          const savedVersion = localStorage.getItem("lyrarma_sw_version");
+          if (savedVersion !== swVersion) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+
+            if ("caches" in window) {
+              const cacheKeys = await caches.keys();
+              await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+            }
+
+            localStorage.setItem("lyrarma_sw_version", swVersion);
+            window.location.reload();
+            return;
+          }
+
+          const registration = await navigator.serviceWorker.register("/service-worker.js");
+          registration.update().catch(() => {});
+        } catch (_) {
+          // Ignore Service Worker and cache migration errors.
+        }
+      });
+    }
+
+    (function syncLanguageState() {
+      const current = "{{ lang }}";
+      const keys = ["lyrarma_lang", "lyrarma-language", "lyrarma.locale", "site_lang"];
+
+      const persistLang = (selectedLang) => {
+        for (const key of keys) {
+          try {
+            localStorage.setItem(key, selectedLang);
+          } catch (_) {
+            // Ignore local storage errors.
+          }
+        }
+      };
+
+      // Persist the selection before navigation to prevent a language flash on the next load.
+      document.querySelectorAll(".lang-switch__link[data-lang]").forEach((link) => {
+        link.addEventListener("click", () => {
+          const nextLang = (link.dataset.lang || "").toLowerCase();
+          if (nextLang === "ru" || nextLang === "en") {
+            persistLang(nextLang);
+          }
+        });
+      });
+
+      // Treat the server value as authoritative and mirror it locally.
+      persistLang(current);
+    })();
+  </script>
+
+</body>
+</html>

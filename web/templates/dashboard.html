@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}{{ t("my_files_folders") }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<div
+  class="dashboard"
+  data-current-folder-id="{{ current_folder_id }}"
+  data-max-upload-mb="{{ max_upload_mb }}"
+  data-empty-files-text="{{ t('empty_files') }}"
+  data-empty-files-hint="{{ t('empty_files_hint') }}"
+  data-share-link-copied="{{ t('share_link_copied') }}"
+  data-share-make-public-first="{{ t('share_make_public_first') }}"
+  data-selected-files="{{ t('selected_files') }}"
+  data-total-size="{{ t('total_size') }}"
+  data-folder-fallback="{{ t('folder_fallback') }}"
+  data-confirm-delete-folder="{{ t('confirm_delete_folder') }}"
+  data-error-delete-folder-retry="{{ t('error_delete_folder_retry') }}"
+  data-error-file-permission-retry="{{ t('error_file_permission_retry') }}"
+  data-error-folder-permission-retry="{{ t('error_folder_permission_retry') }}"
+  data-copy-link-prompt="{{ t('copy_link_prompt') }}"
+  data-file-fallback="{{ t('file_fallback') }}"
+  data-confirm-delete-file="{{ t('confirm_delete_file') }}"
+  data-error-delete-file-retry="{{ t('error_delete_file_retry') }}"
+  data-file-too-large-detail="{{ t('file_too_large_detail') }}"
+  data-upload-progress="{{ t('upload_progress') }}"
+  data-upload-complete="{{ t('upload_complete') }}"
+  data-upload-rejected="{{ t('upload_rejected') }}"
+  data-network-error="{{ t('network_error') }}"
+  data-upload-error="{{ t('upload_error') }}"
+>
+
+  {# ── Top bar ─────────────────────────────────────────────────────── #}
+  <div class="dashboard__header">
+    <h1 class="dashboard__title">{{ t("my_files_folders") }}</h1>
+    <span class="dashboard__count">
+      {{ folders | length }} {{ folders_word }}
+      ·
+      {{ files | length }} {{ files_word }}
+    </span>
+  </div>
+
+  {# ── Successful upload notice ──────────────────────────────────── #}
+  {% if notice %}
+    <div class="alert alert--success">
+      {{ notice }}
+    </div>
+  {% endif %}
+
+  {# ── Error message ────────────────────────────────────────────────── #}
+  {% if error %}
+    <div class="alert alert--error">{{ error }}</div>
+  {% endif %}
+
+  <div class="file-manager">
+    <aside class="file-manager__sidebar card">
+      <div class="sidebar__header">
+        <h2 class="section-title">{{ t("folders") }}</h2>
+      </div>
+
+      <nav class="breadcrumbs" aria-label="{{ t('folder_navigation') }}">
+        {% for item in breadcrumbs %}
+          <a href="/dashboard?folder_id={{ item.id }}" class="breadcrumbs__link {% if item.id == current_folder_id %}breadcrumbs__link--current{% endif %}">
+            {{ item.name }}
+          </a>
+          {% if not loop.last %}
+            <span class="breadcrumbs__sep">/</span>
+          {% endif %}
+        {% endfor %}
+      </nav>
+
+      <form method="post" action="/folders/create?folder_id={{ current_folder_id }}" class="folder-form">
+        <input
+          class="form__input"
+          type="text"
+          name="name"
+          placeholder="{{ t('new_folder') }}"
+          minlength="1"
+          maxlength="128"
+          required
+        />
+        <button type="submit" class="btn btn--primary">{{ t("create") }}</button>
+      </form>
+
+      <div class="folder-grid">
+        {% if current_folder_id == 'root' %}
+        <article class="folder-item folder-item--selected" data-folder-id="root" data-folder-name="{{ t('root_folder') }}" tabindex="0" role="button" aria-label="{{ t('root_folder') }}">
+          <div class="folder-item__icon">🗂</div>
+          <div class="folder-item__body">
+            <div class="folder-item__name">{{ t("root_folder") }}</div>
+            <div class="folder-item__meta">{{ t("shared_files") }}</div>
+          </div>
+        </article>
+        {% elif parent_folder_id %}
+        <article class="folder-item folder-item--up" data-folder-id="{{ parent_folder_id }}" tabindex="0" role="button" aria-label="{{ t('open_parent_folder') }}">
+          <div class="folder-item__icon">↩</div>
+          <div class="folder-item__body">
+            <div class="folder-item__name">..</div>
+            <div class="folder-item__meta">{{ t("go_up") }}</div>
+          </div>
+        </article>
+        {% endif %}
+
+        {% for folder in visible_folders %}
+          <article class="folder-item {% if current_folder_id == folder.id %}folder-item--selected{% endif %}" data-folder-id="{{ folder.id }}" data-folder-name="{{ folder.name }}" tabindex="0" role="button" aria-label="{{ t('open_folder') }}: {{ folder.name }}">
+            <div class="folder-item__icon">📁</div>
+            <div class="folder-item__body">
+              <div class="folder-item__name">{{ folder.name }}</div>
+              <div class="folder-item__meta">
+                <time datetime="{{ folder.created_at }}">{{ folder.created_at }}</time>
+              </div>
+              <div class="folder-item__controls">
+                <label class="permission-switch permission-switch--folder" title="{{ t('access') }}">
+                  <input
+                    type="checkbox"
+                    class="permission-switch__input permission-switch__input--folder"
+                    data-folder-id="{{ folder.id }}"
+                    data-current-folder-id="{{ current_folder_id }}"
+                    {% if folder.is_public %}checked{% endif %}
+                  />
+                  <span class="permission-switch__track" aria-hidden="true">
+                    <span class="permission-switch__thumb"></span>
+                  </span>
+                  <span class="permission-switch__label">
+                     {{ t("public") }}
+                  </span>
+                </label>
+              </div>
+            </div>
+            <form method="post" action="/folders/delete/{{ folder.id }}?folder_id={{ current_folder_id }}" class="inline-form">
+              <button type="submit" class="btn btn--sm btn--danger">{{ t("delete") }}</button>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+
+      {% if not visible_folders %}
+        <div class="empty-inline">{{ t("empty_folders") }}</div>
+      {% endif %}
+    </aside>
+
+    <section class="file-manager__content">
+      <div class="card workspace-head">
+        <div>
+          <h2 class="workspace-head__title">{{ t("file_manager") }}</h2>
+          <p class="workspace-head__path">{{ t("opened_folder") }} <strong>{{ current_folder_name }}</strong></p>
+        </div>
+        <span class="dashboard__count">{{ files | length }} {{ files_word }}</span>
+      </div>
+
+      {# ── File upload form ───────────────────────────────────────────── #}
+      <div class="card upload-card">
+      <h2 class="upload-card__title">{{ t("upload_title") }}</h2>
+      <p class="form__hint">{{ t("max_file_size") }} {{ max_upload_mb }} {{ t("size_mb_unit") }}</p>
+
+      <form
+        method="post"
+        action="/upload"
+        enctype="multipart/form-data"
+        class="upload-form"
+        id="uploadForm"
+      >
+        <input type="hidden" name="folder_id" id="uploadFolderId" value="{{ current_folder_id }}" />
+
+        {# Drag-and-drop area #}
+        <label class="dropzone" for="fileInput" id="dropzone">
+          <div class="dropzone__icon">📂</div>
+          <div class="dropzone__text" id="dropzoneText">
+            {{ t("drag_drop") }}<br/>
+            <span class="dropzone__hint">{{ t("or_click") }}</span>
+          </div>
+          <input
+            type="file"
+            name="file"
+            id="fileInput"
+            class="dropzone__input"
+            multiple
+          />
+        </label>
+
+        {# Progress bar (shown by JavaScript during upload) #}
+        <div class="progress-wrap" id="progressWrap" hidden>
+          <div class="progress-bar" id="progressBar"></div>
+          <span class="progress-label" id="progressLabel">{{ t("upload_in_progress") }}</span>
+        </div>
+
+        <button type="submit" class="btn btn--primary" id="uploadBtn">
+          {{ t("upload") }}
+        </button>
+      </form>
+      </div>
+
+      {# ── File table ─────────────────────────────────────────────────── #}
+      {% if files %}
+      <div class="card card--table">
+        <table class="file-table">
+        <colgroup>
+          <col class="file-table__col file-table__col--name" />
+          <col class="file-table__col file-table__col--type" />
+          <col class="file-table__col file-table__col--size" />
+          <col class="file-table__col file-table__col--date" />
+          <col class="file-table__col file-table__col--access" />
+          <col class="file-table__col file-table__col--actions" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>{{ t("file_name") }}</th>
+            <th>{{ t("file_type") }}</th>
+            <th>{{ t("file_size") }}</th>
+            <th>{{ t("upload_date") }}</th>
+            <th>{{ t("access") }}</th>
+            <th>{{ t("actions") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in files %}
+          <tr class="file-table__row">
+
+            {# File type icon and name #}
+            <td class="file-table__name" title="{{ f.original_name }}">
+              <span class="file-icon">{{ filetype_icon(f.content_type) }}</span>
+              <span class="file-table__name-text">{{ f.original_name }}</span>
+            </td>
+
+            <td class="file-table__type">
+              <code title="{{ f.content_type }}">{{ f.content_type }}</code>
+            </td>
+
+            <td class="file-table__size">{{ filesize(f.size) }}</td>
+
+            <td class="file-table__date">
+              {# Format the ISO date in JavaScript #}
+              <time datetime="{{ f.uploaded_at }}">{{ f.uploaded_at }}</time>
+            </td>
+
+            <td class="file-table__access">
+              <label class="permission-switch" title="{{ t('access') }}">
+                <input
+                  type="checkbox"
+                  class="permission-switch__input"
+                  data-file-id="{{ f.id }}"
+                  data-folder-id="{{ current_folder_id }}"
+                  {% if f.is_public %}checked{% endif %}
+                />
+                <span class="permission-switch__track" aria-hidden="true">
+                  <span class="permission-switch__thumb"></span>
+                </span>
+                <span class="permission-switch__label">
+                  {{ t("public") }}
+                </span>
+              </label>
+            </td>
+
+            <td class="file-table__actions">
+              <button
+                type="button"
+                class="btn btn--sm btn--outline file-table__action-btn file-table__share-btn"
+                data-file-id="{{ f.id }}"
+                data-public-url="/shared-file/{{ f.id }}"
+                data-is-public="{% if f.is_public %}true{% else %}false{% endif %}"
+                title="{{ t('share') }}"
+                aria-label="{{ t('share') }}"
+              >↗</button>
+
+              {# Download button #}
+              <a
+                href="/download/{{ f.id }}"
+                class="btn btn--sm btn--outline file-table__action-btn"
+                title="{{ t('download') }}"
+              >⬇ {{ t("download") }}</a>
+
+              {# Delete button uses a POST form because browsers do not support DELETE forms #}
+              <form
+                method="post"
+                action="/delete/{{ f.id }}?folder_id={{ current_folder_id }}"
+                class="inline-form"
+              >
+                <button
+                  type="submit"
+                  class="btn btn--sm btn--danger file-table__action-btn file-table__delete-btn"
+                  title="{{ t('delete') }}"
+                  aria-label="{{ t('delete') }}"
+                >
+                  🗑
+                </button>
+              </form>
+            </td>
+
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      {% else %}
+      {# Empty state #}
+      <div class="empty-state card">
+        <div class="empty-state__icon">📭</div>
+        <p class="empty-state__text">{{ t("empty_files") }}</p>
+        <p class="empty-state__hint">{{ t("empty_files_hint") }}</p>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+
+</div>
+
+<script src="/static/dashboard.js"></script>
+{% endblock %}

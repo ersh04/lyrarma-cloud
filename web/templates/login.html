@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ t("login") }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<div class="auth-wrap">
+  <div class="card auth-card">
+
+    <h1 class="card__title">{{ t("welcome") }}</h1>
+    <p class="card__subtitle">{{ t("login_subtitle") }}</p>
+
+    {# Successful registration notice (?registered=1 parameter) #}
+    {% if registered %}
+      <div class="alert alert--success">
+        {{ t("account_created") }}
+      </div>
+    {% endif %}
+
+    {# Expired token notice (?expired=1 parameter) #}
+    {% if expired %}
+      <div class="alert alert--warning">
+        {{ t("session_expired") }}
+      </div>
+    {% endif %}
+
+    {# Login error #}
+    {% if error %}
+      <div class="alert alert--error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login" class="form">
+
+      <div class="form__group">
+        <label class="form__label" for="username">{{ t("username") }}</label>
+        <input
+          class="form__input"
+          type="text"
+          id="username"
+          name="username"
+          placeholder="alice"
+          required
+          autocomplete="username"
+          minlength="3"
+        />
+      </div>
+
+      <div class="form__group">
+        <label class="form__label" for="password">{{ t("password") }}</label>
+        <input
+          class="form__input"
+          type="password"
+          id="password"
+          name="password"
+          placeholder="••••••••"
+          required
+          autocomplete="current-password"
+          minlength="8"
+        />
+      </div>
+
+      <button type="submit" class="btn btn--primary btn--full">
+        {{ t("login") }}
+      </button>
+
+    </form>
+
+    <p class="auth-card__footer">
+      {{ t("no_account") }} <a href="/register">{{ t("signup_link") }}</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}
