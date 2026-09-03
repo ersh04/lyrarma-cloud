@@ -9,7 +9,7 @@ The app is working on Go and PostgreSQL.
 1. Download from github:
 
    ```sh
-   
+   https://github.com/ersh04/lyrarma-cloud.git
    ```
 
 2. Start app:
