@@ -2,7 +2,7 @@
 
 Lyrarma Cloud is an open-source cloud platform that you can fully customize.
 
-The app is working on Go and PostgreSQL.
+The app is working on Go and PostgreSQL. You also need installed Docker on your machine.
 
 ## Local run
 
