@@ -318,15 +318,6 @@ go build -o bin/lyrarma-cloud ./src
 
 Keep the working directory at the repository root, or configure the `WEB_*` paths for your deployment. Templates and static assets are loaded from the filesystem and are not embedded in the binary. Restart after changing Go code or templates.
 
-Useful Go checks:
-
-```sh
-go test ./...
-go vet ./...
-```
-
-The repository currently contains no Go test files, so `go test ./...` primarily checks package compilation. A manual smoke check should cover registration, login, folder creation, upload, download, public sharing, and deletion with a disposable file.
-
 Interface text lives in [web/static/translations.json](web/static/translations.json), page layouts in [web/templates](web/templates), and styles in [web/static/style.css](web/static/style.css). When contributing, describe the change and how you verified it in your pull request.
 
 ## Troubleshooting
