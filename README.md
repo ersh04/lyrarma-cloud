@@ -153,7 +153,6 @@ Restart the application after changing configuration. Duration values use Go dur
 | `AWS_SECRET_ACCESS_KEY` | Unset | Secret paired with the access key. If both keys are absent, the client uses the AWS SDK's default credential chain. |
 | `S3_USE_PATH_STYLE` | `true` | Use path-style S3 addressing. Accepts `true` or `false`. |
 | `DATA_DIR` | `./data` | Retained in the configuration, but the current implementation stores file contents in S3. Setting this does not enable local file storage. |
-| `VIRUS_SCANNER_API_URL` | `http://localhost:3311/scan` | Loaded by the configuration parser but not connected to the upload handler. Setting it does not enable virus scanning. |
 
 Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, and access flags are stored in PostgreSQL. A complete backup therefore needs both the database and the S3 objects.
 
