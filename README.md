@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/release-v1.0.0-lightgrey.svg" alt=""></a>
+  <a href="#"><img src="https://img.shields.io/badge/release-v1.0.1-lightgrey.svg" alt=""></a>
   <a href="#"><img src="https://img.shields.io/badge/Go-v1.26.5-blue.svg" alt="Go"></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs"></a>
