@@ -22,5 +22,13 @@ if ! docker compose -f compose.db.yaml up -d --wait --wait-timeout 60; then
     exit 1
 fi
 
-printf 'Starting Lyrarma Cloud. Press Ctrl+C to stop.\n'
-exec go run ./src
+# Restart cloud if it need
+printf 'Starting Lyrarma Cloud.\n'
+
+PID=$(sudo lsof -t -i :8080)
+if [ -n "$PID" ]; then
+        sudo kill "$PID"
+fi
+
+nohup go run ./src > log 2>&1 &
+printf 'Lyrarma Cloud started. Logs are being written to log.\n'

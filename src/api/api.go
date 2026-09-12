@@ -73,6 +73,7 @@ func (a *API) registerRoutes(cfg *config.Config, logger *slog.Logger) {
 	authHandler := managers.NewAuthHandler(a.store, cfg, logger)
 	fileHandler := managers.NewFileHandler(a.store, a.s3Store, cfg, logger)
 	folderHandler := managers.NewFolderHandler(a.store, a.s3Store, logger)
+	infoHandler := managers.NewInfoHandler(cfg)
 	requireAuth := middleware.RequireAuth(cfg.JWT.Secret)
 
 	// Service health check route.
@@ -106,4 +107,7 @@ func (a *API) registerRoutes(cfg *config.Config, logger *slog.Logger) {
 	api.Delete("/folders/:folderID", requireAuth, folderHandler.Delete)
 	api.Get("/public/folders/:folderID/info", folderHandler.GetPublicFolderInfo)
 	api.Get("/public/folders/:folderID/download", folderHandler.DownloadPublicFolder)
+
+	// Info routes.
+	api.Get("/info/max_upload_size", infoHandler.MaxUploadSizeHandler)
 }
