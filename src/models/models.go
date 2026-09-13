@@ -30,6 +30,9 @@ type RegisterRequest struct {
 
 	// Password is the plaintext password and must contain at least 8 characters.
 	Password string `json:"password"`
+
+	// BetaKey authorizes account registration.
+	BetaKey string `json:"beta_key"`
 }
 
 // LoginRequest is the sign-in request body.

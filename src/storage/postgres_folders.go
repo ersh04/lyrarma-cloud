@@ -53,7 +53,7 @@ func (s *SQLStore) CreateFolder(ctx context.Context, entry models.FolderEntry) e
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return ErrFolderAlreadyExists
 	}
-	return fmt.Errorf("создание папки: %w", err)
+	return fmt.Errorf("create folder: %w", err)
 }
 
 // GetFolder returns a folder by its ID and owner ID
@@ -63,7 +63,7 @@ func (s *SQLStore) GetFolder(ctx context.Context, userID, folderID string) (mode
 		return models.FolderEntry{}, ErrFolderNotFound
 	}
 	if err != nil {
-		return models.FolderEntry{}, fmt.Errorf("поиск папки: %w", err)
+		return models.FolderEntry{}, fmt.Errorf("find folder: %w", err)
 	}
 	return entry, nil
 }
@@ -75,7 +75,7 @@ func (s *SQLStore) GetPublicFolder(ctx context.Context, folderID string) (models
 		return models.FolderEntry{}, ErrFolderNotFound
 	}
 	if err != nil {
-		return models.FolderEntry{}, fmt.Errorf("поиск публичной папки: %w", err)
+		return models.FolderEntry{}, fmt.Errorf("find public folder: %w", err)
 	}
 	return entry, nil
 }

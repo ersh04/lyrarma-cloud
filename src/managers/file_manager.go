@@ -1,6 +1,7 @@
 package managers
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -23,7 +24,7 @@ import (
 type FileHandler struct {
 	metadataStore *storage.SQLStore
 	s3Storage     *storage.S3Store
-	cfg           *config.Config
+	limits        config.UserLimitSet
 	logger        *slog.Logger
 }
 
@@ -31,18 +32,18 @@ type FileHandler struct {
 func NewFileHandler(
 	metadataStore *storage.SQLStore,
 	s3Storage *storage.S3Store,
-	cfg *config.Config,
+	limits config.UserLimitSet,
 	logger *slog.Logger,
 ) *FileHandler {
 	return &FileHandler{
 		metadataStore: metadataStore,
 		s3Storage:     s3Storage,
-		cfg:           cfg,
+		limits:        limits,
 		logger:        logger,
 	}
 }
 
-// FileList returns the authenticated user files with optional folder filtering.
+// FileList returns authenticated user files with optional folder filtering.
 func (h *FileHandler) FileList(c fiber.Ctx) error {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := models.NormalizeFolderID(c.Query("folder_id"))
@@ -62,10 +63,21 @@ func (h *FileHandler) FileList(c fiber.Ctx) error {
 	})
 }
 
-// UploadFile accepts a file from a multipart form, uploads it to S3, and stores its metadata in PostgreSQL.
+// UploadFile validates quota, uploads a multipart file to S3, and stores its metadata.
 func (h *FileHandler) UploadFile(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := models.NormalizeFolderID(c.Query("folder_id"))
+
+	userLimits, err := h.userLimits(c.Context(), userID)
+	if err != nil {
+		if errors.Is(err, storage.ErrUserNotFound) {
+			httpresponse.WriteError(c, fiber.StatusUnauthorized, "unauthorized", "user no longer exists")
+			return
+		}
+		h.logger.Error("failed to determine user limits", "user_id", userID, "err", err)
+		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "failed to determine upload limits")
+		return
+	}
 
 	if folderID != "root" {
 		if _, err := h.metadataStore.GetFolder(c.Context(), userID, folderID); err != nil {
@@ -118,7 +130,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "failed to read uploaded file")
 		return
 	}
-	if size > h.cfg.Server.MaxUploadSize {
+	if !userLimits.AllowsFile(size) {
 		httpresponse.WriteError(c, fiber.StatusRequestEntityTooLarge, "too_large", "file size exceeds the allowed limit")
 		return
 	}
@@ -143,6 +155,34 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		UploadedAt:   time.Now().UTC(),
 	}
 	objectKey := fileObjectKey(entry.OwnerID, entry.ID)
+	reservationID := generateID()
+	if err := h.metadataStore.ReserveUpload(
+		c.Context(),
+		userID,
+		reservationID,
+		size,
+		userLimits.MaxStorageBytes(),
+	); err != nil {
+		if errors.Is(err, storage.ErrStorageQuotaExceeded) {
+			httpresponse.WriteError(c, fiber.StatusInsufficientStorage, "storage_quota_exceeded", "storage quota exceeded")
+			return
+		}
+		h.logger.Error("failed to reserve storage quota", "user_id", userID, "err", err)
+		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "failed to reserve storage quota")
+		return
+	}
+
+	reservationActive := true
+	defer func() {
+		if !reservationActive {
+			return
+		}
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.metadataStore.ReleaseUploadReservation(cleanupContext, userID, reservationID); err != nil {
+			h.logger.Error("failed to release storage reservation", "user_id", userID, "reservation_id", reservationID, "err", err)
+		}
+	}()
 
 	if err := h.s3Storage.UploadFile(c.Context(), objectKey, file, entry.ContentType); err != nil {
 		h.logger.Error("file upload to S3 failed", "file_id", entry.ID, "user_id", userID, "err", err)
@@ -150,8 +190,11 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		return
 	}
 
-	if err := h.metadataStore.CreateFile(c.Context(), entry); err != nil {
-		if cleanupErr := h.s3Storage.DeleteFile(c.Context(), objectKey); cleanupErr != nil {
+	if err := h.metadataStore.CommitReservedFile(c.Context(), entry, reservationID); err != nil {
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupErr := h.s3Storage.DeleteFile(cleanupContext, objectKey)
+		cancel()
+		if cleanupErr != nil {
 			h.logger.Error("failed to roll back S3 upload", "file_id", entry.ID, "err", cleanupErr)
 		}
 		if errors.Is(err, storage.ErrFolderNotFound) {
@@ -162,6 +205,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "save_error", "failed to save file")
 		return
 	}
+	reservationActive = false
 
 	h.logger.Info(
 		"file uploaded",
@@ -190,7 +234,7 @@ func (h *FileHandler) DownloadFile(c fiber.Ctx) {
 	h.streamFile(c, entry)
 }
 
-// DownloadPublicFile sends the contents of a public file without authentication.
+// DownloadPublicFile sends a public file without authentication.
 func (h *FileHandler) DownloadPublicFile(c fiber.Ctx) {
 	fileID := strings.TrimSpace(c.Params("fileID"))
 	if fileID == "" {
@@ -267,7 +311,7 @@ func (h *FileHandler) FileInfo(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, entry)
 }
 
-// DeleteFile removes the file metadata and the corresponding object from S3.
+// DeleteFile removes file metadata and the corresponding S3 object.
 func (h *FileHandler) DeleteFile(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))
@@ -290,7 +334,7 @@ func (h *FileHandler) DeleteFile(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, models.SuccessResponse{Message: "file deleted"})
 }
 
-// ChangeFilePermission changes whether a file owned by the user is public.
+// ChangeFilePermission changes whether an owned file is public.
 func (h *FileHandler) ChangeFilePermission(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))
@@ -326,6 +370,14 @@ func (h *FileHandler) handleFileLookupError(
 	}
 	h.logger.Error(logMessage, "file_id", fileID, "err", err)
 	httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "internal server error")
+}
+
+func (h *FileHandler) userLimits(ctx context.Context, userID string) (config.UserLimits, error) {
+	plan, err := h.metadataStore.GetUserPlan(ctx, userID)
+	if err != nil {
+		return config.UserLimits{}, err
+	}
+	return h.limits.For(plan)
 }
 
 func fileObjectKey(ownerID, fileID string) string {

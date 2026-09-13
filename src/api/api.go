@@ -3,7 +3,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v3"
@@ -20,27 +19,31 @@ type API struct {
 	app     *fiber.App
 }
 
-// New creates the API, connects PostgreSQL and S3, and then registers the routes.
-func New(cfg *config.Config, logger *slog.Logger) (*API, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("конфигурация API не задана")
-	}
+// New creates the API, connects PostgreSQL and S3, and registers the routes.
+func New(cfg config.Config, logger *slog.Logger) (*API, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	store, err := storage.New(cfg.Storage.DataDir, cfg.DatabaseURL)
+	storageConfig := cfg.Storage()
+	limits := cfg.UserLimits()
+	store, err := storage.New(
+		storageConfig.DataDir(),
+		cfg.DatabaseURL(),
+		limits.DefaultPlan(),
+		limits.PlanNames(),
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	fileStore, err := storage.NewS3Store(context.Background(), storage.S3StoreConfig{
-		Bucket:          cfg.Storage.Bucket,
-		Region:          cfg.Storage.Region,
-		Endpoint:        cfg.Storage.Endpoint,
-		AccessKeyID:     cfg.Storage.AccessKeyID,
-		SecretAccessKey: cfg.Storage.SecretAccessKey,
-		UsePathStyle:    cfg.Storage.UsePathStyle,
+		Bucket:          storageConfig.Bucket(),
+		Region:          storageConfig.Region(),
+		Endpoint:        storageConfig.Endpoint(),
+		AccessKeyID:     storageConfig.AccessKeyID(),
+		SecretAccessKey: storageConfig.SecretAccessKey(),
+		UsePathStyle:    storageConfig.UsePathStyle(),
 	})
 	if err != nil {
 		store.Close()
@@ -50,7 +53,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*API, error) {
 	api := &API{
 		store:   store,
 		s3Store: fileStore,
-		app:     fiber.New(fiber.Config{BodyLimit: int(cfg.Server.MaxUploadSize + (1 << 20))}),
+		app:     fiber.New(fiber.Config{BodyLimit: limits.RequestBodyLimit()}),
 	}
 	api.registerRoutes(cfg, logger)
 	return api, nil
@@ -63,18 +66,20 @@ func (a *API) Close() {
 	}
 }
 
-// App returns the Fiber application with the API routes registered.
+// App returns the Fiber application with registered API routes.
 func (a *API) App() *fiber.App {
 	return a.app
 }
 
-// registerRoutes registers the authentication, file, and folder routes.
-func (a *API) registerRoutes(cfg *config.Config, logger *slog.Logger) {
-	authHandler := managers.NewAuthHandler(a.store, cfg, logger)
-	fileHandler := managers.NewFileHandler(a.store, a.s3Store, cfg, logger)
+// registerRoutes registers authentication, file, folder, and information routes.
+func (a *API) registerRoutes(cfg config.Config, logger *slog.Logger) {
+	jwtConfig := cfg.JWT()
+	limits := cfg.UserLimits()
+	authHandler := managers.NewAuthHandler(a.store, jwtConfig, cfg.BetaTestKey(), logger)
+	fileHandler := managers.NewFileHandler(a.store, a.s3Store, limits, logger)
 	folderHandler := managers.NewFolderHandler(a.store, a.s3Store, logger)
-	infoHandler := managers.NewInfoHandler(cfg)
-	requireAuth := middleware.RequireAuth(cfg.JWT.Secret)
+	infoHandler := managers.NewInfoHandler(a.store, limits, logger)
+	requireAuth := middleware.RequireAuth(jwtConfig.Secret())
 
 	// Service health check route.
 	a.app.Get("/health", func(c fiber.Ctx) error {
@@ -108,6 +113,7 @@ func (a *API) registerRoutes(cfg *config.Config, logger *slog.Logger) {
 	api.Get("/public/folders/:folderID/info", folderHandler.GetPublicFolderInfo)
 	api.Get("/public/folders/:folderID/download", folderHandler.DownloadPublicFolder)
 
-	// Info routes.
+	// Information routes.
 	api.Get("/info/max_upload_size", infoHandler.MaxUploadSizeHandler)
+	api.Get("/info/limits", requireAuth, infoHandler.UserLimitsHandler)
 }

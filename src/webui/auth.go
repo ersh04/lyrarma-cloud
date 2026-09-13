@@ -66,6 +66,7 @@ func (h *Handler) register(c fiber.Ctx) error {
 	response, err := h.callJSON(c, fiber.MethodPost, "/api/auth/register", models.RegisterRequest{
 		Username: username,
 		Password: password,
+		BetaKey:  c.FormValue("beta_key"),
 	}, "")
 	if err != nil {
 		h.logger.Error("internal registration request failed", "err", err)

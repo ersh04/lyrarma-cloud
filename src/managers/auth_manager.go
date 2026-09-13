@@ -2,6 +2,7 @@ package managers
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,14 +22,25 @@ import (
 
 // AuthHandler handles user registration and sign-in.
 type AuthHandler struct {
-	store  *storage.SQLStore
-	cfg    *config.Config
-	logger *slog.Logger
+	store           *storage.SQLStore
+	jwt             config.JWTConfig
+	registrationKey string
+	logger          *slog.Logger
 }
 
 // NewAuthHandler creates an authentication handler with the provided dependencies.
-func NewAuthHandler(store *storage.SQLStore, cfg *config.Config, logger *slog.Logger) *AuthHandler {
-	return &AuthHandler{store: store, cfg: cfg, logger: logger}
+func NewAuthHandler(
+	store *storage.SQLStore,
+	jwtConfig config.JWTConfig,
+	registrationKey string,
+	logger *slog.Logger,
+) *AuthHandler {
+	return &AuthHandler{
+		store:           store,
+		jwt:             jwtConfig,
+		registrationKey: registrationKey,
+		logger:          logger,
+	}
 }
 
 // Register creates a new user account.
@@ -36,6 +48,11 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 	var request models.RegisterRequest
 	if err := json.NewDecoder(c.Request().BodyStream()).Decode(&request); err != nil {
 		httpresponse.WriteError(c, fiber.StatusBadRequest, "invalid_body", "invalid JSON")
+		return
+	}
+
+	if !equalRegistrationKey(request.BetaKey, h.registrationKey) {
+		httpresponse.WriteError(c, fiber.StatusForbidden, "invalid_beta_key", "invalid registration key")
 		return
 	}
 
@@ -90,7 +107,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusCreated, models.SuccessResponse{Message: "user registered"})
 }
 
-// Login validates the credentials and issues a JWT.
+// Login validates credentials and issues a JWT.
 func (h *AuthHandler) Login(c fiber.Ctx) {
 	var request models.LoginRequest
 	if err := json.NewDecoder(c.Request().BodyStream()).Decode(&request); err != nil {
@@ -128,7 +145,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 	}
 
 	now := time.Now().UTC()
-	expiresAt := now.Add(h.cfg.JWT.TokenTTL)
+	expiresAt := now.Add(h.jwt.TokenTTL())
 	claims := middleware.Claims{
 		UserID: user.ID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -139,7 +156,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(h.cfg.JWT.Secret))
+	tokenString, err := token.SignedString([]byte(h.jwt.Secret()))
 	if err != nil {
 		h.logger.Error("JWT signing failed", "err", err)
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "internal server error")
@@ -151,6 +168,13 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 		Token:     tokenString,
 		ExpiresAt: expiresAt,
 	})
+}
+
+func equalRegistrationKey(value, expected string) bool {
+	if expected == "" || len(value) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(value), []byte(expected)) == 1
 }
 
 // generateID creates a cryptographically random hexadecimal identifier.

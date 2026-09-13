@@ -18,7 +18,7 @@ var (
 // CreateUser adds a user to PostgreSQL.
 func (s *SQLStore) CreateUser(user models.User) error {
 	_, err := s.db.Exec(context.Background(), insertUserSQL,
-		user.ID, user.Username, user.PasswordHash, user.CreatedAt)
+		user.ID, user.Username, user.PasswordHash, s.defaultPlan, user.CreatedAt)
 	if err == nil {
 		return nil
 	}
@@ -55,4 +55,17 @@ func (s *SQLStore) GetUserByID(id string) (models.User, error) {
 		return models.User{}, fmt.Errorf("find user by ID: %w", err)
 	}
 	return user, nil
+}
+
+// GetUserPlan returns the user's current service plan.
+func (s *SQLStore) GetUserPlan(ctx context.Context, id string) (string, error) {
+	var plan string
+	err := s.db.QueryRow(ctx, selectUserPlanSQL, id).Scan(&plan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("find user service plan: %w", err)
+	}
+	return plan, nil
 }

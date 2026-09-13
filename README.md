@@ -74,6 +74,7 @@ Copy the template if you do not already have a `.env` file:
 
 ```sh
 cp -n example.env .env
+chmod 600 .env
 ```
 
 Edit `.env` before starting the server:
@@ -92,7 +93,7 @@ The S3 settings in `example.env` are placeholders. The application does not crea
 docker compose -f compose.db.yaml up -d --wait
 ```
 
-The service binds to `127.0.0.1:5432` and persists its database in the `postgres-data` named volume. On startup, the application automatically creates the `users`, `files`, and `folders` tables if they do not exist. The database itself must already exist; Compose creates it for the bundled service.
+The service binds to `127.0.0.1:5432` and persists its database in the `postgres-data` named volume. On startup, the application creates or migrates the `users`, `files`, `folders`, and `upload_reservations` tables. The database itself must already exist; Compose creates it for the bundled service.
 
 For an existing PostgreSQL server, skip this step and set `DATABASE_URL` to that database's connection string.
 
@@ -132,20 +133,23 @@ This preserves the database volume. Adding `-v` would remove the volume and its 
 Settings are loaded in this order:
 
 1. Non-empty process environment variables take precedence.
-2. The first existing configuration file is read: `.env`, then `../.env`, then `example.env`, relative to the working directory. These files are not merged.
-3. Unspecified settings use the defaults shown below.
+2. `CONFIG_FILE` selects an explicit dotenv file when set; otherwise only `.env` in the working directory is considered.
+3. Unspecified non-sensitive settings use the defaults shown below.
 
-Restart the application after changing configuration. Duration values use Go duration syntax, such as `30s`, `2m`, or `24h`, and must be positive.
+`example.env` is a template and is never loaded automatically. A dotenv file must be a regular file, no larger than 1 MiB, and inaccessible to group and other users (for example, mode `0600`). Restart the application after changing configuration. Duration values use Go duration syntax, such as `30s`, `2m`, or `24h`, and must be positive.
 
 ### Application and storage
 
 | Variable | Built-in default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | Required | PostgreSQL connection string. The template matches the bundled database. |
-| `JWT_SECRET` | Required | Secret used to sign and verify authentication tokens. |
-| `BETA_TEST_KEY` | Required | Registration key checked by the web registration form. |
+| `JWT_SECRET` | Required | Secret used to sign and verify authentication tokens. It must contain at least 32 bytes and must not equal the template value. |
+| `BETA_TEST_KEY` | Required | Registration key required by both the web form and JSON API. It must contain at least 16 bytes and must not equal the template value. |
 | `JWT_TTL` | `24h` | Lifetime of issued JWTs and browser authentication cookies. |
-| `MAX_UPLOAD_MB` | `1024` | Maximum size of one file in MiB (`1024 × 1024` bytes per unit). Must be a positive integer. |
+| `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB. To allow files up to this ceiling, configure the reverse proxy request-body limit at least 1 MiB higher for multipart overhead; use a lower proxy limit only intentionally. |
+| `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB. |
+| `DEFAULT_USER_PLAN` | Required | Name of the configured plan assigned to new users and to legacy rows without a plan during migration. |
+| `USER_PLANS_JSON` | Required | JSON array of plan objects with `name`, `max_upload_mb`, and `max_storage_mb`. |
 | `S3_BUCKET` | Required | Existing bucket for file contents. |
 | `AWS_REGION` | Required | Region passed to the S3 client. |
 | `S3_ENDPOINT` | Unset | Custom S3 endpoint; unset uses the SDK's standard endpoint resolution. |
@@ -154,9 +158,28 @@ Restart the application after changing configuration. Duration values use Go dur
 | `S3_USE_PATH_STYLE` | `true` | Use path-style S3 addressing. Accepts `true` or `false`. |
 | `DATA_DIR` | `./data` | Retained in the configuration, but the current implementation stores file contents in S3. Setting this does not enable local file storage. |
 
-Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, and access flags are stored in PostgreSQL. A complete backup therefore needs both the database and the S3 objects.
+Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, access flags, user plans, and active upload reservations are stored in PostgreSQL. A complete backup therefore needs both the database and the S3 objects.
 
-`BETA_TEST_KEY` is checked by the web form at `/register`. The current JSON endpoint `/api/auth/register` accepts registration without this key, so the key does not restrict registration across the entire application.
+All limit values are positive integers in MiB. Plan limits cannot exceed their corresponding absolute limits, and a plan's file limit cannot exceed its storage quota. Invalid names, duplicate plans, unknown JSON properties, missing defaults, and invalid limits stop application startup.
+
+```dotenv
+DEFAULT_USER_PLAN=user
+USER_PLANS_JSON=[{"name":"user","max_upload_mb":1024,"max_storage_mb":10240},{"name":"premium","max_upload_mb":10240,"max_storage_mb":102400}]
+```
+
+Plan names must start with a lowercase ASCII letter, may contain lowercase letters, digits, `_`, and `-`, and may be up to 32 bytes long.
+
+To add a plan without changing the application code or database schema:
+
+1. Append another object to `USER_PLANS_JSON`.
+2. Restart the application so every instance uses the same immutable catalog.
+3. Assign the plan in PostgreSQL:
+
+```sql
+UPDATE users SET plan = 'enterprise-v2' WHERE username = 'demo';
+```
+
+The database validates the plan-name format, while application startup verifies that every plan currently assigned in PostgreSQL exists in `USER_PLANS_JSON`. Before removing a plan from the JSON catalog, reassign all users who use it; otherwise the next startup fails safely. Clients cannot choose their own plan. Uploads reserve quota atomically before S3 transfer, so concurrent requests cannot overrun the configured storage allowance.
 
 ### HTTP server and web resources
 
@@ -205,7 +228,7 @@ The browser interface manages its session cookie separately. For direct API call
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | HTTP server health response. |
-| `POST` | `/api/auth/register` | No | Register with JSON `username` and `password`. |
+| `POST` | `/api/auth/register` | No | Register with JSON `username`, `password`, and `beta_key`. |
 | `POST` | `/api/auth/login` | No | Sign in with JSON `username` and `password`; returns `token` and `expires_at`. |
 | `GET` | `/api/files?folder_id=root` | Bearer token | List files in one folder; omitted `folder_id` means `root`. |
 | `POST` | `/api/files/upload?folder_id=root` | Bearer token | Upload one multipart form field named `file`. |
@@ -221,6 +244,8 @@ The browser interface manages its session cookie separately. For direct API call
 | `GET` | `/api/public/files/:fileID/download` | No | Download a public file. |
 | `GET` | `/api/public/folders/:folderID/info` | No | Get public folder metadata. |
 | `GET` | `/api/public/folders/:folderID/download` | No | Download a public folder tree as ZIP. |
+| `GET` | `/api/info/max_upload_size` | No | Get the absolute system file-size ceiling in bytes. |
+| `GET` | `/api/info/limits` | Bearer token | Get the current user's plan, limits, used storage, and reserved storage in bytes. |
 
 The file visibility endpoint currently uses `GET`, while the folder visibility endpoint uses `POST`. The table reflects the implemented routes.
 
@@ -231,7 +256,7 @@ Register an example account:
 ```sh
 curl -X POST http://localhost:8080/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"demo","password":"example-password"}'
+  -d '{"username":"demo","password":"example-password","beta_key":"your-beta-test-key"}'
 ```
 
 Sign in:
@@ -277,7 +302,7 @@ File and folder lists return an object with `files` or `folders`, plus `total`. 
 }
 ```
 
-Common statuses include `201` for creation, `400` for invalid input, `401` for authentication failures, `404` for unavailable files or folders, `409` for an existing username, and `413` for an oversized upload.
+Common statuses include `201` for creation, `400` for invalid input, `401` for authentication failures, `403` for an invalid registration key, `404` for unavailable files or folders, `409` for an existing username, `413` for an oversized file, and `507` when the user's storage quota is exhausted.
 
 ## Project structure
 
@@ -287,7 +312,6 @@ Common statuses include `201` for creation, `400` for invalid input, `401` for a
 │   ├── main.go
 │   ├── api/
 │   ├── config/
-│   ├── envloader/
 │   ├── httpresponse/
 │   ├── managers/
 │   ├── middleware/
@@ -304,7 +328,7 @@ Common statuses include `201` for creation, `400` for invalid input, `401` for a
 └── run.sh
 ```
 
-The `api` package registers routes, `managers` implements request handlers, and `storage` handles PostgreSQL metadata and S3 objects. The `webui` package renders browser pages and delegates operations to the API; `envloader` reads and validates configuration.
+The `config` package loads and validates one immutable settings snapshot. The `api` package registers routes, `managers` implements request handlers, and `storage` handles PostgreSQL metadata, quota reservations, and S3 objects. The `webui` package renders browser pages and delegates operations to the API.
 
 ## Development
 
@@ -324,11 +348,13 @@ Interface text lives in [web/static/translations.json](web/static/translations.j
 
 | Symptom | What to check |
 | --- | --- |
-| A required-variable error on startup | Ensure the selected configuration file or process environment supplies `DATABASE_URL`, `JWT_SECRET`, `BETA_TEST_KEY`, `S3_BUCKET`, and `AWS_REGION`. |
+| A required-variable error on startup | Ensure the selected configuration file or process environment supplies the database, secret, S3, absolute-limit, and plan-limit variables shown above. |
+| Configuration file permissions are rejected | Run `chmod 600 .env`, or provide settings through process environment variables. |
 | PostgreSQL connection refused | Run `docker compose -f compose.db.yaml ps` and `docker compose -f compose.db.yaml logs database`; confirm the database is healthy and `DATABASE_URL` matches its address. |
 | PostgreSQL password authentication fails after changing Compose settings | An existing database volume keeps its original credentials. Update the database credentials or use the credentials with which it was initialized. |
 | The server starts but uploads fail | Check the server output, bucket existence, endpoint, region, credentials, and S3 permissions. `/health` does not validate storage access. |
-| Upload returns `413` | Check `MAX_UPLOAD_MB` and any request-body limit configured in front of the application. |
+| Upload returns `413` | Check the user's plan file limit, `MAX_UPLOAD_MB`, and the request-body limit configured in front of the application. |
+| Upload returns `507` | The sum of stored files and active upload reservations exceeds the user's plan storage quota. |
 | Large transfers time out | Check `SERVER_READ_TIMEOUT`, `SERVER_WRITE_TIMEOUT`, and any proxy timeouts. |
 | Templates or translations cannot be found | Start from the repository root or set the corresponding `WEB_*` paths. |
 | Login does not persist over local HTTP | Check that `SESSION_COOKIE_SECURE=false` and the cookie path matches the application. |

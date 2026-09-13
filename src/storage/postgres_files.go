@@ -31,31 +31,6 @@ func scanFile(row rowScanner) (models.FileEntry, error) {
 	return entry, err
 }
 
-// CreateFile stores file metadata in PostgreSQL.
-func (s *SQLStore) CreateFile(ctx context.Context, entry models.FileEntry) error {
-	entry.FolderID = models.NormalizeFolderID(entry.FolderID)
-	if entry.FolderID != "root" {
-		if _, err := s.GetFolder(ctx, entry.OwnerID, entry.FolderID); err != nil {
-			return err
-		}
-	}
-
-	_, err := s.db.Exec(ctx, insertFileSQL,
-		entry.ID,
-		entry.OwnerID,
-		entry.FolderID,
-		entry.OriginalName,
-		entry.Size,
-		entry.ContentType,
-		entry.IsPublic,
-		entry.UploadedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("save file metadata: %w", err)
-	}
-	return nil
-}
-
 // GetFile returns metadata for a file owned by a user.
 func (s *SQLStore) GetFile(ctx context.Context, userID, fileID string) (models.FileEntry, error) {
 	entry, err := scanFile(s.db.QueryRow(ctx, selectOwnedFileSQL, fileID, userID))

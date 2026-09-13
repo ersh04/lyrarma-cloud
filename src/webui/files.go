@@ -14,6 +14,7 @@ import (
 
 func (h *Handler) dashboard(c fiber.Ctx) error {
 	token := h.token(c)
+	maxUploadSize := h.config.MaxUploadSize
 
 	currentFolderID := strings.TrimSpace(c.Query("folder_id"))
 	if currentFolderID == "" {
@@ -24,7 +25,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		"/api/files?folder_id="+url.QueryEscape(currentFolderID), nil, "", token)
 	if err != nil {
 		h.logger.Error("failed to retrieve files", "err", err)
-		return h.renderDashboard(c, nil, nil, currentFolderID, h.message(c, "error_files_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.message(c, "error_files_list"))
 	}
 	if filesResponse.status == fiber.StatusUnauthorized {
 		return h.expireSession(c)
@@ -33,22 +34,40 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 	foldersResponse, err := h.callAPI(c, fiber.MethodGet, "/api/folders", nil, "", token)
 	if err != nil {
 		h.logger.Error("failed to retrieve folders", "err", err)
-		return h.renderDashboard(c, nil, nil, currentFolderID, h.message(c, "error_folders_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.message(c, "error_folders_list"))
 	}
 	if foldersResponse.status == fiber.StatusUnauthorized {
 		return h.expireSession(c)
 	}
 
+	limitsResponse, limitsErr := h.callAPI(c, fiber.MethodGet, "/api/info/limits", nil, "", token)
+	if limitsErr != nil {
+		h.logger.Error("failed to retrieve user limits", "err", limitsErr)
+	} else if limitsResponse.status == fiber.StatusUnauthorized {
+		return h.expireSession(c)
+	} else if limitsResponse.status == fiber.StatusOK {
+		var limits struct {
+			MaxUploadSize int64 `json:"max_upload_size"`
+		}
+		if json.Unmarshal(limitsResponse.body, &limits) == nil && limits.MaxUploadSize > 0 {
+			maxUploadSize = limits.MaxUploadSize
+		} else {
+			h.logger.Error("failed to decode user limits")
+		}
+	} else {
+		h.logger.Error("failed to retrieve user limits", "status", limitsResponse.status)
+	}
+
 	var fileList models.FileListResponse
 	var folderList models.FolderListResponse
 	if filesResponse.status != fiber.StatusOK || json.Unmarshal(filesResponse.body, &fileList) != nil {
-		return h.renderDashboard(c, nil, nil, currentFolderID, h.apiMessage(c, filesResponse, "error_files_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.apiMessage(c, filesResponse, "error_files_list"))
 	}
 	if foldersResponse.status != fiber.StatusOK || json.Unmarshal(foldersResponse.body, &folderList) != nil {
-		return h.renderDashboard(c, fileList.Files, nil, currentFolderID, h.apiMessage(c, foldersResponse, "error_folders_list"))
+		return h.renderDashboard(c, fileList.Files, nil, currentFolderID, maxUploadSize, h.apiMessage(c, foldersResponse, "error_folders_list"))
 	}
 
-	return h.renderDashboard(c, fileList.Files, folderList.Folders, currentFolderID, h.dashboardError(c))
+	return h.renderDashboard(c, fileList.Files, folderList.Folders, currentFolderID, maxUploadSize, h.dashboardError(c))
 }
 
 func (h *Handler) renderDashboard(
@@ -56,6 +75,7 @@ func (h *Handler) renderDashboard(
 	files []models.FileEntry,
 	folders []models.FolderEntry,
 	currentFolderID string,
+	maxUploadSize int64,
 	errorMessage string,
 ) error {
 	folderByID := make(map[string]models.FolderEntry, len(folders))
@@ -103,7 +123,7 @@ func (h *Handler) renderDashboard(
 		"notice":              h.dashboardNotice(c),
 		"files_word":          h.countWord(h.requestLanguage(c), len(files), "file"),
 		"folders_word":        h.countWord(h.requestLanguage(c), len(folders), "folder"),
-		"max_upload_mb":       h.config.MaxUploadSize / (1024 * 1024),
+		"max_upload_mb":       maxUploadSize / (1024 * 1024),
 	}, fiber.StatusOK)
 }
 
