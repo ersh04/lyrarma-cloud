@@ -8,18 +8,27 @@ import "time"
 //  User
 // ─────────────────────────────────────────────
 
-// User represents a registered cloud storage user.
+// User represents authentication data for a registered user.
 type User struct {
-	// ID is a cryptographically random user identifier.
+	// ID is the stable identifier shared with other services.
 	ID string `json:"id"`
 
 	// Username is the unique account name used to sign in.
 	Username string `json:"username"`
 
-	// PasswordHash is a bcrypt password hash and is never returned to the client.
-	PasswordHash string `json:"password_hash"`
+	// Password contains a bcrypt hash and is never returned to the client.
+	Password string `json:"-"`
 
-	// CreatedAt is the registration date and time.
+	// Email is the unique email address associated with the account.
+	Email string `json:"email"`
+}
+
+// UserProfile links an authenticated user to cloud storage data.
+type UserProfile struct {
+	// ID is the user identifier from the authentication database.
+	ID string `json:"id"`
+
+	// CreatedAt is the cloud profile creation date and time.
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -30,6 +39,9 @@ type RegisterRequest struct {
 
 	// Password is the plaintext password and must contain at least 8 characters.
 	Password string `json:"password"`
+
+	// Email is the email address for the new account.
+	Email string `json:"email"`
 
 	// BetaKey authorizes account registration.
 	BetaKey string `json:"beta_key"`
@@ -55,7 +67,7 @@ type LoginResponse struct {
 // ─────────────────────────────────────────────
 
 // FileEntry contains metadata for one stored file.
-// File bytes are stored on disk; this structure is serialized to JSON.
+// File bytes are stored separately; this structure is serialized to JSON.
 type FileEntry struct {
 	// ID is a cryptographically random file identifier.
 	ID string `json:"id"`

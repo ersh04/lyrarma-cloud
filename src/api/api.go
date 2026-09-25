@@ -14,9 +14,10 @@ import (
 
 // API groups the HTTP routes and data stores.
 type API struct {
-	store   *storage.SQLStore
-	s3Store *storage.S3Store
-	app     *fiber.App
+	store     *storage.SQLStore
+	userStore *storage.UserStore
+	s3Store   *storage.S3Store
+	app       *fiber.App
 }
 
 // New creates the API, connects PostgreSQL and S3, and registers the routes.
@@ -36,6 +37,16 @@ func New(cfg config.Config, logger *slog.Logger) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	userStore, err := storage.NewUserStore(cfg.UsersDatabaseURL())
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+	if err := storage.ReconcileUserProfiles(context.Background(), store, userStore); err != nil {
+		userStore.Close()
+		store.Close()
+		return nil, err
+	}
 
 	fileStore, err := storage.NewS3Store(context.Background(), storage.S3StoreConfig{
 		Bucket:          storageConfig.Bucket(),
@@ -46,23 +57,26 @@ func New(cfg config.Config, logger *slog.Logger) (*API, error) {
 		UsePathStyle:    storageConfig.UsePathStyle(),
 	})
 	if err != nil {
+		userStore.Close()
 		store.Close()
 		return nil, err
 	}
 
 	api := &API{
-		store:   store,
-		s3Store: fileStore,
-		app:     fiber.New(fiber.Config{BodyLimit: limits.RequestBodyLimit()}),
+		store:     store,
+		userStore: userStore,
+		s3Store:   fileStore,
+		app:       fiber.New(fiber.Config{BodyLimit: limits.RequestBodyLimit()}),
 	}
 	api.registerRoutes(cfg, logger)
 	return api, nil
 }
 
-// Close closes the PostgreSQL connection.
+// Close closes the PostgreSQL connections.
 func (a *API) Close() {
 	if a != nil {
 		a.store.Close()
+		a.userStore.Close()
 	}
 }
 
@@ -75,7 +89,7 @@ func (a *API) App() *fiber.App {
 func (a *API) registerRoutes(cfg config.Config, logger *slog.Logger) {
 	jwtConfig := cfg.JWT()
 	limits := cfg.UserLimits()
-	authHandler := managers.NewAuthHandler(a.store, jwtConfig, cfg.BetaTestKey(), logger)
+	authHandler := managers.NewAuthHandler(a.store, a.userStore, jwtConfig, cfg.BetaTestKey(), logger)
 	fileHandler := managers.NewFileHandler(a.store, a.s3Store, limits, logger)
 	folderHandler := managers.NewFolderHandler(a.store, a.s3Store, logger)
 	infoHandler := managers.NewInfoHandler(a.store, limits, logger)

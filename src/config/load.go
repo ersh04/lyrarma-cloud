@@ -26,6 +26,7 @@ const (
 	sessionCookieSecureEnv   = "SESSION_COOKIE_SECURE"
 	sessionCookieSameSiteEnv = "SESSION_COOKIE_SAME_SITE"
 	databaseURLEnv           = "DATABASE_URL"
+	usersDatabaseURLEnv      = "USERS_DATABASE_URL"
 	cloudDataDirEnv          = "DATA_DIR"
 	cloudJWTSecretEnv        = "JWT_SECRET"
 	cloudJWTTokenTTLEnv      = "JWT_TTL"
@@ -93,6 +94,7 @@ func Load() (Config, error) {
 			tokenTTL: 24 * time.Hour,
 		},
 		databaseURL: value(values, databaseURLEnv, ""),
+		usersDBURL:  value(values, usersDatabaseURLEnv, ""),
 		betaTestKey: value(values, betaTestKeyEnv, ""),
 	}
 
@@ -220,6 +222,9 @@ func mebibytesValue(parsed int64, name string) (int64, error) {
 func validateConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.databaseURL) == "" {
 		return fmt.Errorf("%s is required", databaseURLEnv)
+	}
+	if strings.TrimSpace(cfg.usersDBURL) == "" {
+		return fmt.Errorf("%s is required", usersDatabaseURLEnv)
 	}
 	if len(cfg.betaTestKey) < 16 || cfg.betaTestKey == exampleBetaTestKey {
 		return fmt.Errorf("%s must contain at least 16 bytes and differ from the example value", betaTestKeyEnv)

@@ -1,4 +1,4 @@
-name: database
+name: lyrarma-cloud-database
 services:
   database:
     image: postgres:17.11-alpine

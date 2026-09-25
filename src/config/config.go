@@ -11,6 +11,7 @@ type Config struct {
 	storage      StorageConfig
 	jwt          JWTConfig
 	databaseURL  string
+	usersDBURL   string
 	betaTestKey  string
 	userLimitSet UserLimitSet
 }
@@ -62,6 +63,7 @@ func (c Config) Session() SessionConfig            { return c.session }
 func (c Config) Storage() StorageConfig            { return c.storage }
 func (c Config) JWT() JWTConfig                    { return c.jwt }
 func (c Config) DatabaseURL() string               { return c.databaseURL }
+func (c Config) UsersDatabaseURL() string          { return c.usersDBURL }
 func (c Config) BetaTestKey() string               { return c.betaTestKey }
 func (c Config) UserLimits() UserLimitSet          { return c.userLimitSet }
 func (c ServerConfig) Address() string             { return c.address }

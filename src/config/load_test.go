@@ -27,6 +27,9 @@ func TestLoadBuildsValidatedImmutableLimits(t *testing.T) {
 	if cfg.UserLimits().DefaultPlan() != "user" {
 		t.Fatalf("unexpected default plan: %q", cfg.UserLimits().DefaultPlan())
 	}
+	if cfg.UsersDatabaseURL() != "postgres://localhost/lyrarma-services-users" {
+		t.Fatalf("unexpected users database URL: %q", cfg.UsersDatabaseURL())
+	}
 }
 
 func TestLoadRejectsExampleSecret(t *testing.T) {
@@ -35,6 +38,15 @@ func TestLoadRejectsExampleSecret(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected the example secret to be rejected")
+	}
+}
+
+func TestLoadRequiresUsersDatabaseURL(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(usersDatabaseURLEnv, "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected users database URL to be required")
 	}
 }
 
@@ -91,6 +103,7 @@ func setValidEnvironment(t *testing.T) {
 	values := map[string]string{
 		configFileEnv:       configPath,
 		databaseURLEnv:      "postgres://localhost/test",
+		usersDatabaseURLEnv: "postgres://localhost/lyrarma-services-users",
 		betaTestKeyEnv:      "0123456789abcdef",
 		cloudJWTSecretEnv:   "0123456789abcdef0123456789abcdef",
 		s3BucketEnv:         "test-bucket",

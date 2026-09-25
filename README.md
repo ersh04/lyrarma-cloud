@@ -19,7 +19,7 @@
 
 Lyrarma Cloud is an open-source file storage platform you can host and customize yourself. It provides a browser interface and an HTTP API for managing files, organizing folders, and sharing downloads.
 
-The application runs as a single Go server. PostgreSQL stores accounts and file metadata, while an S3-compatible object store holds file contents. HTML pages are rendered on the server with Pongo2; the frontend uses plain JavaScript and CSS, with no separate frontend build step.
+The application runs as a single Go server. One PostgreSQL database stores cloud profiles and file metadata, while the dedicated `lyrarma-services-users` database stores authentication data. An S3-compatible object store holds file contents. HTML pages are rendered on the server with Pongo2; the frontend uses plain JavaScript and CSS, with no separate frontend build step.
 
 ## Contents
 
@@ -50,12 +50,12 @@ The application runs as a single Go server. PostgreSQL stores accounts and file 
 | Component | Purpose |
 | --- | --- |
 | Go | The module declares Go **1.26.5** in [go.mod](go.mod). Use a toolchain that satisfies that requirement. |
-| PostgreSQL | Stores users, folders, and file metadata. The included Compose file uses `postgres:17.11-alpine`. |
-| Docker with Compose | Starts the bundled local PostgreSQL service. Optional if you already have a PostgreSQL instance. |
+| PostgreSQL | Separately stores authentication data and cloud metadata. Both included Compose files use `postgres:17.11-alpine`. |
+| Docker with Compose | Starts the two bundled local PostgreSQL services. Optional if you already have PostgreSQL instances. |
 | S3-compatible storage | Stores uploaded file contents. An existing bucket and working credentials are required. |
 | Git | Clones the repository. |
 
-[compose.db.yaml](compose.db.yaml) starts **only PostgreSQL**. The Go server runs on your host, and S3 storage must be configured separately.
+[compose.db.yaml](compose.db.yaml) and [compose.users_db.yaml](compose.users_db.yaml) start **only PostgreSQL**. The Go server runs on your host, and S3 storage must be configured separately.
 
 ## Local setup
 
@@ -79,7 +79,7 @@ chmod 600 .env
 
 Edit `.env` before starting the server:
 
-- Keep `DATABASE_URL` from the template if you use the bundled PostgreSQL service.
+- Keep `DATABASE_URL` and `USERS_DATABASE_URL` from the template if you use the bundled PostgreSQL services.
 - Set your own `JWT_SECRET` and `BETA_TEST_KEY`.
 - Replace `S3_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` with your storage settings.
 - Set `S3_ENDPOINT` to your provider's endpoint. Remove the example endpoint for standard AWS S3 endpoint resolution.
@@ -87,15 +87,26 @@ Edit `.env` before starting the server:
 
 The S3 settings in `example.env` are placeholders. The application does not create a bucket for you. Its credentials must allow object uploads, downloads, and deletion, including multipart upload operations for large files.
 
+To start both PostgreSQL databases and Lyrarma Cloud in one command, run:
+
+```sh
+./run.sh
+```
+
+The application starts in the background and writes its output to `log`. The commands below describe the equivalent manual startup.
+
 ### 3. Start PostgreSQL
 
 ```sh
 docker compose -f compose.db.yaml up -d --wait
+docker compose -f compose.users_db.yaml up -d --wait
 ```
 
-The service binds to `127.0.0.1:5432` and persists its database in the `postgres-data` named volume. On startup, the application creates or migrates the `users`, `files`, `folders`, and `upload_reservations` tables. The database itself must already exist; Compose creates it for the bundled service.
+The cloud database binds to `127.0.0.1:5432`. The dedicated `lyrarma-services-users` database binds to `127.0.0.1:5433`. Each service uses its own named volume. On startup, the application creates or migrates cloud metadata tables in the first database and creates the authentication `users` table in the second database with exactly `id`, `username`, `password`, and `email` columns. The `password` column contains a bcrypt hash, never plaintext. The cloud `users` table contains only `id`, `plan`, and `created_at`, so `id` is the sole value duplicated between the two user tables.
 
-For an existing PostgreSQL server, skip this step and set `DATABASE_URL` to that database's connection string.
+Existing installations must first copy their account names and bcrypt hashes from the legacy cloud `users.password_hash` column into `lyrarma-services-users`, supplying a real email for every account. During startup, the application matches legacy records by username, copies each existing cloud ID into the authentication table, verifies every cloud profile has an authentication account, and then removes `username` and `password_hash` from the cloud table. If a matching authentication account is missing, startup stops before either legacy column is removed.
+
+For existing PostgreSQL servers, skip this step and set `DATABASE_URL` and `USERS_DATABASE_URL` to their respective connection strings.
 
 ### 4. Start the application
 
@@ -124,6 +135,7 @@ Press `Ctrl+C` in the terminal running Go, then stop PostgreSQL:
 
 ```sh
 docker compose -f compose.db.yaml down
+docker compose -f compose.users_db.yaml down
 ```
 
 This preserves the database volume. Adding `-v` would remove the volume and its data.
@@ -143,6 +155,7 @@ Settings are loaded in this order:
 | Variable | Built-in default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | Required | PostgreSQL connection string. The template matches the bundled database. |
+| `USERS_DATABASE_URL` | Required | PostgreSQL connection string for the dedicated `lyrarma-services-users` authentication database. |
 | `JWT_SECRET` | Required | Secret used to sign and verify authentication tokens. It must contain at least 32 bytes and must not equal the template value. |
 | `BETA_TEST_KEY` | Required | Registration key required by both the web form and JSON API. It must contain at least 16 bytes and must not equal the template value. |
 | `JWT_TTL` | `24h` | Lifetime of issued JWTs and browser authentication cookies. |
@@ -158,7 +171,7 @@ Settings are loaded in this order:
 | `S3_USE_PATH_STYLE` | `true` | Use path-style S3 addressing. Accepts `true` or `false`. |
 | `DATA_DIR` | `./data` | Retained in the configuration, but the current implementation stores file contents in S3. Setting this does not enable local file storage. |
 
-Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, access flags, user plans, and active upload reservations are stored in PostgreSQL. A complete backup therefore needs both the database and the S3 objects.
+Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, access flags, user IDs, plans, and active upload reservations are stored in the cloud PostgreSQL database. IDs, usernames, bcrypt password hashes, and email addresses are stored in `lyrarma-services-users`. A complete backup therefore needs both databases and the S3 objects.
 
 All limit values are positive integers in MiB. Plan limits cannot exceed their corresponding absolute limits, and a plan's file limit cannot exceed its storage quota. Invalid names, duplicate plans, unknown JSON properties, missing defaults, and invalid limits stop application startup.
 
@@ -173,10 +186,16 @@ To add a plan without changing the application code or database schema:
 
 1. Append another object to `USER_PLANS_JSON`.
 2. Restart the application so every instance uses the same immutable catalog.
-3. Assign the plan in PostgreSQL:
+3. Read the user ID from `lyrarma-services-users`:
 
 ```sql
-UPDATE users SET plan = 'enterprise-v2' WHERE username = 'demo';
+SELECT id FROM users WHERE username = 'demo';
+```
+
+4. Assign the plan by that ID in `lyrarma_cloud`:
+
+```sql
+UPDATE users SET plan = 'enterprise-v2' WHERE id = '<user-id>';
 ```
 
 The database validates the plan-name format, while application startup verifies that every plan currently assigned in PostgreSQL exists in `USER_PLANS_JSON`. Before removing a plan from the JSON catalog, reassign all users who use it; otherwise the next startup fails safely. Clients cannot choose their own plan. Uploads reserve quota atomically before S3 transfer, so concurrent requests cannot overrun the configured storage allowance.
@@ -205,7 +224,7 @@ The database validates the plan-name format, while application startup verifies 
 
 ## Using the web interface
 
-1. Open `/register`, choose a username and password, and enter the configured `BETA_TEST_KEY`. The API checks a minimum username length of 3 bytes and password length of 8 bytes.
+1. Open `/register`, choose a username, email, and password, and enter the configured `BETA_TEST_KEY`. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes.
 2. Sign in at `/login` to open `/dashboard`.
 3. Create folders and open the folder where you want to upload files. Select files or drop them into the upload area.
 4. Download files from the dashboard or enable public access to share them.
@@ -228,7 +247,7 @@ The browser interface manages its session cookie separately. For direct API call
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | HTTP server health response. |
-| `POST` | `/api/auth/register` | No | Register with JSON `username`, `password`, and `beta_key`. |
+| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, `password`, and `beta_key`. |
 | `POST` | `/api/auth/login` | No | Sign in with JSON `username` and `password`; returns `token` and `expires_at`. |
 | `GET` | `/api/files?folder_id=root` | Bearer token | List files in one folder; omitted `folder_id` means `root`. |
 | `POST` | `/api/files/upload?folder_id=root` | Bearer token | Upload one multipart form field named `file`. |
@@ -256,7 +275,7 @@ Register an example account:
 ```sh
 curl -X POST http://localhost:8080/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"demo","password":"example-password","beta_key":"your-beta-test-key"}'
+  -d '{"username":"demo","email":"demo@example.com","password":"example-password","beta_key":"your-beta-test-key"}'
 ```
 
 Sign in:
@@ -302,7 +321,7 @@ File and folder lists return an object with `files` or `folders`, plus `total`. 
 }
 ```
 
-Common statuses include `201` for creation, `400` for invalid input, `401` for authentication failures, `403` for an invalid registration key, `404` for unavailable files or folders, `409` for an existing username, `413` for an oversized file, and `507` when the user's storage quota is exhausted.
+Common statuses include `201` for creation, `400` for invalid input, `401` for authentication failures, `403` for an invalid registration key, `404` for unavailable files or folders, `409` for an existing username or email, `413` for an oversized file, and `507` when the user's storage quota is exhausted.
 
 ## Project structure
 
@@ -323,6 +342,7 @@ Common statuses include `201` for creation, `400` for invalid input, `401` for a
 │   ├── static/
 │   └── icons/
 ├── compose.db.yaml
+├── compose.users_db.yaml
 ├── example.env
 ├── go.mod
 └── run.sh
@@ -350,7 +370,7 @@ Interface text lives in [web/static/translations.json](web/static/translations.j
 | --- | --- |
 | A required-variable error on startup | Ensure the selected configuration file or process environment supplies the database, secret, S3, absolute-limit, and plan-limit variables shown above. |
 | Configuration file permissions are rejected | Run `chmod 600 .env`, or provide settings through process environment variables. |
-| PostgreSQL connection refused | Run `docker compose -f compose.db.yaml ps` and `docker compose -f compose.db.yaml logs database`; confirm the database is healthy and `DATABASE_URL` matches its address. |
+| PostgreSQL connection refused | Check both Compose projects and confirm `DATABASE_URL` and `USERS_DATABASE_URL` match their addresses. |
 | PostgreSQL password authentication fails after changing Compose settings | An existing database volume keeps its original credentials. Update the database credentials or use the credentials with which it was initialized. |
 | The server starts but uploads fail | Check the server output, bucket existence, endpoint, region, credentials, and S3 permissions. `/health` does not validate storage access. |
 | Upload returns `413` | Check the user's plan file limit, `MAX_UPLOAD_MB`, and the request-body limit configured in front of the application. |
@@ -358,7 +378,7 @@ Interface text lives in [web/static/translations.json](web/static/translations.j
 | Large transfers time out | Check `SERVER_READ_TIMEOUT`, `SERVER_WRITE_TIMEOUT`, and any proxy timeouts. |
 | Templates or translations cannot be found | Start from the repository root or set the corresponding `WEB_*` paths. |
 | Login does not persist over local HTTP | Check that `SESSION_COOKIE_SECURE=false` and the cookie path matches the application. |
-| Port 8080 or 5432 is already in use | Change `SERVER_ADDRESS`, or adjust the database port mapping together with `DATABASE_URL`. |
+| Port 8080, 5432, or 5433 is already in use | Change `SERVER_ADDRESS`, or adjust the corresponding database port mapping together with its URL. |
 | The registration form rejects the beta key | Use `BETA_TEST_KEY` from the active configuration and restart after changing it. |
 
 ## License

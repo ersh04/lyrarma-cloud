@@ -105,13 +105,35 @@ const (
 
 	createUsersTableSQL = `
 		CREATE TABLE IF NOT EXISTS users (
-			id            TEXT PRIMARY KEY,
-			username      TEXT NOT NULL UNIQUE,
-			password_hash TEXT NOT NULL,
-			plan          TEXT NOT NULL
+			id         TEXT PRIMARY KEY,
+			plan       TEXT NOT NULL
 				CONSTRAINT users_plan_name_check CHECK (plan ~ '^[a-z][a-z0-9_-]{0,31}$'),
-			created_at    TIMESTAMPTZ NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)
+	`
+	makeLegacyIdentityColumnsNullableSQL = `
+		DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = current_schema()
+					AND table_name = 'users'
+					AND column_name = 'username'
+			) THEN
+				ALTER TABLE users ALTER COLUMN username DROP NOT NULL;
+			END IF;
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = current_schema()
+					AND table_name = 'users'
+					AND column_name = 'password_hash'
+			) THEN
+				ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+			END IF;
+		END;
+		$$
 	`
 
 	addUserPlanColumnSQL = `
@@ -170,10 +192,9 @@ const (
 		WHERE created_at < NOW() - INTERVAL '24 hours'
 	`
 
-	insertUserSQL           = `INSERT INTO users (id, username, password_hash, plan, created_at) VALUES ($1, $2, $3, $4, $5)`
-	selectUserByUsernameSQL = `SELECT id, username, password_hash, created_at FROM users WHERE username = $1`
-	selectUserByIDSQL       = `SELECT id, username, password_hash, created_at FROM users WHERE id = $1`
-	selectUserPlanSQL       = `SELECT plan FROM users WHERE id = $1`
+	insertUserProfileSQL = `INSERT INTO users (id, plan, created_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`
+	selectUserProfileSQL = `SELECT id, created_at FROM users WHERE id = $1`
+	selectUserPlanSQL    = `SELECT plan FROM users WHERE id = $1`
 )
 
 // SQLStore contains a PostgreSQL connection and a data directory.
@@ -220,6 +241,10 @@ func (s *SQLStore) init(defaultPlan string, configuredPlans []string) error {
 	}()
 
 	_, err = tx.Exec(ctx, createUsersTableSQL)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, makeLegacyIdentityColumnsNullableSQL)
 	if err != nil {
 		return err
 	}

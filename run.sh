@@ -16,18 +16,24 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
-printf 'Starting PostgreSQL and waiting for readiness...\n'
+printf 'Starting cloud PostgreSQL and waiting for readiness...\n'
 if ! docker compose -f compose.db.yaml up -d --wait --wait-timeout 60; then
-    printf 'ERROR: PostgreSQL is not running or not ready. Check the Docker output above.\n' >&2
-    exit 1
+	printf 'ERROR: Cloud PostgreSQL is not running or not ready. Check the Docker output above.\n' >&2
+	exit 1
 fi
 
-# Restart cloud if it need
+printf 'Starting users PostgreSQL and waiting for readiness...\n'
+if ! docker compose -f compose.users_db.yaml up -d --wait --wait-timeout 60; then
+	printf 'ERROR: Users PostgreSQL is not running or not ready. Check the Docker output above.\n' >&2
+	exit 1
+fi
+
+# Restart the cloud process if the configured port is already in use.
 printf 'Starting Lyrarma Cloud.\n'
 
-PID=$(sudo lsof -t -i :8080)
+PID="$(lsof -t -iTCP:8080 -sTCP:LISTEN || true)"
 if [ -n "$PID" ]; then
-        sudo kill "$PID"
+    kill "$PID"
 fi
 
 nohup go run ./src > log 2>&1 &

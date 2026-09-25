@@ -6,55 +6,32 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lyrarma/cloud-api/src/models"
 )
 
-var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrUserAlreadyExists = errors.New("user already exists")
-)
-
-// CreateUser adds a user to PostgreSQL.
-func (s *SQLStore) CreateUser(user models.User) error {
-	_, err := s.db.Exec(context.Background(), insertUserSQL,
-		user.ID, user.Username, user.PasswordHash, s.defaultPlan, user.CreatedAt)
-	if err == nil {
-		return nil
+// EnsureUserProfile creates a cloud user profile or returns the existing one.
+func (s *SQLStore) EnsureUserProfile(profile models.UserProfile) (models.UserProfile, error) {
+	_, err := s.db.Exec(
+		context.Background(),
+		insertUserProfileSQL,
+		profile.ID,
+		s.defaultPlan,
+		profile.CreatedAt,
+	)
+	if err != nil {
+		return models.UserProfile{}, fmt.Errorf("create user profile: %w", err)
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ErrUserAlreadyExists
-	}
-	return fmt.Errorf("create user: %w", err)
-}
 
-// GetUserByUsername returns a user by username.
-func (s *SQLStore) GetUserByUsername(username string) (models.User, error) {
-	var user models.User
-	err := s.db.QueryRow(context.Background(), selectUserByUsernameSQL, username).
-		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	var stored models.UserProfile
+	err = s.db.QueryRow(context.Background(), selectUserProfileSQL, profile.ID).
+		Scan(&stored.ID, &stored.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return models.User{}, ErrUserNotFound
+		return models.UserProfile{}, ErrUserNotFound
 	}
 	if err != nil {
-		return models.User{}, fmt.Errorf("find user: %w", err)
+		return models.UserProfile{}, fmt.Errorf("find user profile: %w", err)
 	}
-	return user, nil
-}
-
-// GetUserByID returns a user by identifier.
-func (s *SQLStore) GetUserByID(id string) (models.User, error) {
-	var user models.User
-	err := s.db.QueryRow(context.Background(), selectUserByIDSQL, id).
-		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return models.User{}, ErrUserNotFound
-	}
-	if err != nil {
-		return models.User{}, fmt.Errorf("find user by ID: %w", err)
-	}
-	return user, nil
+	return stored, nil
 }
 
 // GetUserPlan returns the user's current service plan.

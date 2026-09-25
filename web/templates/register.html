@@ -30,6 +30,20 @@
       </div>
 
       <div class="form__group">
+        <label class="form__label" for="email">{{ t("email") }}</label>
+        <input
+          class="form__input"
+          type="email"
+          id="email"
+          name="email"
+          placeholder="alice@example.com"
+          required
+          autocomplete="email"
+          maxlength="254"
+        />
+      </div>
+
+      <div class="form__group">
         <label class="form__label" for="password">{{ t("password") }}</label>
         <input
           class="form__input"

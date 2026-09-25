@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -22,7 +24,8 @@ import (
 
 // AuthHandler handles user registration and sign-in.
 type AuthHandler struct {
-	store           *storage.SQLStore
+	cloudStore      *storage.SQLStore
+	userStore       *storage.UserStore
 	jwt             config.JWTConfig
 	registrationKey string
 	logger          *slog.Logger
@@ -30,13 +33,15 @@ type AuthHandler struct {
 
 // NewAuthHandler creates an authentication handler with the provided dependencies.
 func NewAuthHandler(
-	store *storage.SQLStore,
+	cloudStore *storage.SQLStore,
+	userStore *storage.UserStore,
 	jwtConfig config.JWTConfig,
 	registrationKey string,
 	logger *slog.Logger,
 ) *AuthHandler {
 	return &AuthHandler{
-		store:           store,
+		cloudStore:      cloudStore,
+		userStore:       userStore,
 		jwt:             jwtConfig,
 		registrationKey: registrationKey,
 		logger:          logger,
@@ -56,6 +61,8 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 		return
 	}
 
+	request.Username = strings.TrimSpace(request.Username)
+	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
 	if len(request.Username) < 3 {
 		httpresponse.WriteError(
 			c,
@@ -74,6 +81,15 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 		)
 		return
 	}
+	if !validEmail(request.Email) {
+		httpresponse.WriteError(
+			c,
+			fiber.StatusBadRequest,
+			"validation_error",
+			"a valid email address is required",
+		)
+		return
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(request.Password), 12)
 	if err != nil {
@@ -83,12 +99,12 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 	}
 
 	user := models.User{
-		ID:           generateID(),
-		Username:     request.Username,
-		PasswordHash: string(hash),
-		CreatedAt:    time.Now().UTC(),
+		ID:       generateID(),
+		Username: request.Username,
+		Password: string(hash),
+		Email:    request.Email,
 	}
-	if err := h.store.CreateUser(user); err != nil {
+	if err := h.userStore.CreateUser(user); err != nil {
 		if errors.Is(err, storage.ErrUserAlreadyExists) {
 			httpresponse.WriteError(
 				c,
@@ -98,12 +114,34 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 			)
 			return
 		}
+		if errors.Is(err, storage.ErrEmailAlreadyUsed) {
+			httpresponse.WriteError(
+				c,
+				fiber.StatusConflict,
+				"email_exists",
+				"a user with this email already exists",
+			)
+			return
+		}
 		h.logger.Error("user creation failed", "err", err)
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
-	h.logger.Info("new user registered", "username", user.Username, "id", user.ID)
+	profile, err := h.cloudStore.EnsureUserProfile(models.UserProfile{
+		ID:        user.ID,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		if deleteErr := h.userStore.DeleteUser(user); deleteErr != nil {
+			h.logger.Error("failed to roll back authentication user", "username", user.Username, "err", deleteErr)
+		}
+		h.logger.Error("cloud user profile creation failed", "username", user.Username, "err", err)
+		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+
+	h.logger.Info("new user registered", "username", user.Username, "id", profile.ID)
 	httpresponse.WriteJSON(c, fiber.StatusCreated, models.SuccessResponse{Message: "user registered"})
 }
 
@@ -115,7 +153,8 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 		return
 	}
 
-	user, err := h.store.GetUserByUsername(request.Username)
+	request.Username = strings.TrimSpace(request.Username)
+	user, err := h.userStore.GetUserByUsername(request.Username)
 	if err != nil {
 		if errors.Is(err, storage.ErrUserNotFound) {
 			httpresponse.WriteError(
@@ -132,7 +171,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword(
-		[]byte(user.PasswordHash),
+		[]byte(user.Password),
 		[]byte(request.Password),
 	); err != nil {
 		httpresponse.WriteError(
@@ -143,15 +182,24 @@ func (h *AuthHandler) Login(c fiber.Ctx) {
 		)
 		return
 	}
+	profile, err := h.cloudStore.EnsureUserProfile(models.UserProfile{
+		ID:        user.ID,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		h.logger.Error("cloud user profile lookup failed", "username", user.Username, "err", err)
+		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
 
 	now := time.Now().UTC()
 	expiresAt := now.Add(h.jwt.TokenTTL())
 	claims := middleware.Claims{
-		UserID: user.ID,
+		UserID: profile.ID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
-			Issuer:    "lyrarma-cloud",
+			Issuer:    "lyrarma-services-users",
 		},
 	}
 
@@ -175,6 +223,14 @@ func equalRegistrationKey(value, expected string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(value), []byte(expected)) == 1
+}
+
+func validEmail(value string) bool {
+	if value == "" || len(value) > 254 {
+		return false
+	}
+	address, err := mail.ParseAddress(value)
+	return err == nil && address.Address == value && strings.Contains(value, "@")
 }
 
 // generateID creates a cryptographically random hexadecimal identifier.
