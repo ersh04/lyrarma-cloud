@@ -102,9 +102,9 @@ docker compose -f compose.db.yaml up -d --wait
 docker compose -f compose.users_db.yaml up -d --wait
 ```
 
-The cloud database binds to `127.0.0.1:5432`. The dedicated `lyrarma-services-users` database binds to `127.0.0.1:5433`. Each service uses its own named volume. On startup, the application creates or migrates cloud metadata tables in the first database and creates the authentication `users` table in the second database with exactly `id`, `username`, `password`, and `email` columns. The `password` column contains a bcrypt hash, never plaintext. The cloud `users` table contains only `id`, `plan`, and `created_at`, so `id` is the sole value duplicated between the two user tables.
+The cloud database binds to `127.0.0.1:5432`. The dedicated `lyrarma-services-users` database binds to `127.0.0.1:5433`. Each service uses its own named volume. On startup, the application creates or migrates cloud metadata tables in the first database and creates the authentication `users` table in the second database with exactly `id`, `username`, `password`, `email`, and `plan` columns. The `password` column contains a bcrypt hash, never plaintext, and `plan` is a non-empty PostgreSQL `TEXT[]` array. The cloud `users` table contains only `id` and `created_at`, so `id` is the sole value duplicated between the two user tables.
 
-Existing installations must first copy their account names and bcrypt hashes from the legacy cloud `users.password_hash` column into `lyrarma-services-users`, supplying a real email for every account. During startup, the application matches legacy records by username, copies each existing cloud ID into the authentication table, verifies every cloud profile has an authentication account, and then removes `username` and `password_hash` from the cloud table. If a matching authentication account is missing, startup stops before either legacy column is removed.
+Existing installations must first copy their account names and bcrypt hashes from the legacy cloud `users.password_hash` column into `lyrarma-services-users`, supplying a real email for every account. During startup, the application matches legacy records by username, copies each existing cloud ID into the authentication table, moves the existing cloud plan into the authentication plan array, verifies every cloud profile has an authentication account, and then removes `username`, `password_hash`, and `plan` from the cloud table. Accounts without an existing plan receive `DEFAULT_USER_PLAN`. If a matching authentication account is missing or a plan is not configured, startup stops before the legacy columns are removed.
 
 For existing PostgreSQL servers, skip this step and set `DATABASE_URL` and `USERS_DATABASE_URL` to their respective connection strings.
 
@@ -161,7 +161,7 @@ Settings are loaded in this order:
 | `JWT_TTL` | `24h` | Lifetime of issued JWTs and browser authentication cookies. |
 | `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB. To allow files up to this ceiling, configure the reverse proxy request-body limit at least 1 MiB higher for multipart overhead; use a lower proxy limit only intentionally. |
 | `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB. |
-| `DEFAULT_USER_PLAN` | Required | Name of the configured plan assigned to new users and to legacy rows without a plan during migration. |
+| `DEFAULT_USER_PLAN` | Required | Name placed in the initial plan list for new users and legacy accounts without a plan during migration. |
 | `USER_PLANS_JSON` | Required | JSON array of plan objects with `name`, `max_upload_mb`, and `max_storage_mb`. |
 | `S3_BUCKET` | Required | Existing bucket for file contents. |
 | `AWS_REGION` | Required | Region passed to the S3 client. |
@@ -171,9 +171,9 @@ Settings are loaded in this order:
 | `S3_USE_PATH_STYLE` | `true` | Use path-style S3 addressing. Accepts `true` or `false`. |
 | `DATA_DIR` | `./data` | Retained in the configuration, but the current implementation stores file contents in S3. Setting this does not enable local file storage. |
 
-Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, access flags, user IDs, plans, and active upload reservations are stored in the cloud PostgreSQL database. IDs, usernames, bcrypt password hashes, and email addresses are stored in `lyrarma-services-users`. A complete backup therefore needs both databases and the S3 objects.
+Objects are stored under `users/<userID>/files/<fileID>`. Original filenames, folder relationships, access flags, user IDs, and active upload reservations are stored in the cloud PostgreSQL database. IDs, usernames, bcrypt password hashes, email addresses, and assigned plan arrays are stored in `lyrarma-services-users`. A complete backup therefore needs both databases and the S3 objects.
 
-All limit values are positive integers in MiB. Plan limits cannot exceed their corresponding absolute limits, and a plan's file limit cannot exceed its storage quota. Invalid names, duplicate plans, unknown JSON properties, missing defaults, and invalid limits stop application startup.
+All limit values are positive integers in MiB. Plan limits cannot exceed their corresponding absolute limits, and a plan's file limit cannot exceed its storage quota. When an account has multiple plans, the highest storage limit and the highest upload limit are applied. Invalid names, duplicate plan definitions, unknown JSON properties, missing defaults, and invalid limits stop application startup.
 
 ```dotenv
 DEFAULT_USER_PLAN=user
@@ -182,23 +182,19 @@ USER_PLANS_JSON=[{"name":"user","max_upload_mb":1024,"max_storage_mb":10240},{"n
 
 Plan names must start with a lowercase ASCII letter, may contain lowercase letters, digits, `_`, and `-`, and may be up to 32 bytes long.
 
-To add a plan without changing the application code or database schema:
+To add and assign plans without changing the application code or database schema:
 
 1. Append another object to `USER_PLANS_JSON`.
 2. Restart the application so every instance uses the same immutable catalog.
-3. Read the user ID from `lyrarma-services-users`:
+3. Assign one or more plans in `lyrarma-services-users`:
 
 ```sql
-SELECT id FROM users WHERE username = 'demo';
+UPDATE users
+SET plan = ARRAY['user', 'enterprise-v2']::text[]
+WHERE username = 'demo';
 ```
 
-4. Assign the plan by that ID in `lyrarma_cloud`:
-
-```sql
-UPDATE users SET plan = 'enterprise-v2' WHERE id = '<user-id>';
-```
-
-The database validates the plan-name format, while application startup verifies that every plan currently assigned in PostgreSQL exists in `USER_PLANS_JSON`. Before removing a plan from the JSON catalog, reassign all users who use it; otherwise the next startup fails safely. Clients cannot choose their own plan. Uploads reserve quota atomically before S3 transfer, so concurrent requests cannot overrun the configured storage allowance.
+The database requires a non-empty, one-dimensional plan array without null values, while application startup verifies that every assigned plan exists in `USER_PLANS_JSON`. Before removing a plan from the JSON catalog, remove it from every user's array; otherwise the next startup fails safely. Clients cannot choose their own plans. Uploads reserve quota atomically before S3 transfer, so concurrent requests cannot overrun the configured storage allowance.
 
 ### HTTP server and web resources
 
@@ -264,7 +260,7 @@ The browser interface manages its session cookie separately. For direct API call
 | `GET` | `/api/public/folders/:folderID/info` | No | Get public folder metadata. |
 | `GET` | `/api/public/folders/:folderID/download` | No | Download a public folder tree as ZIP. |
 | `GET` | `/api/info/max_upload_size` | No | Get the absolute system file-size ceiling in bytes. |
-| `GET` | `/api/info/limits` | Bearer token | Get the current user's plan, limits, used storage, and reserved storage in bytes. |
+| `GET` | `/api/info/limits` | Bearer token | Get the current user's plan list, effective limits, used storage, and reserved storage in bytes. |
 
 The file visibility endpoint currently uses `GET`, while the folder visibility endpoint uses `POST`. The table reflects the implemented routes.
 

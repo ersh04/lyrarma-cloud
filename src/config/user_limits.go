@@ -139,6 +139,34 @@ func (s UserLimitSet) For(plan string) (UserLimits, error) {
 	return limits, nil
 }
 
+// ForPlans combines assigned plans by taking the highest value for each limit.
+func (s UserLimitSet) ForPlans(plans []string) (UserLimits, error) {
+	if len(plans) == 0 {
+		return UserLimits{}, fmt.Errorf("at least one service plan must be assigned")
+	}
+
+	var combined UserLimits
+	seen := make(map[string]struct{}, len(plans))
+	for _, plan := range plans {
+		if _, exists := seen[plan]; exists {
+			continue
+		}
+		seen[plan] = struct{}{}
+
+		limits, err := s.For(plan)
+		if err != nil {
+			return UserLimits{}, err
+		}
+		if limits.maxStorageBytes > combined.maxStorageBytes {
+			combined.maxStorageBytes = limits.maxStorageBytes
+		}
+		if limits.maxFileBytes > combined.maxFileBytes {
+			combined.maxFileBytes = limits.maxFileBytes
+		}
+	}
+	return combined, nil
+}
+
 // DefaultPlan returns the plan assigned to newly registered users.
 func (s UserLimitSet) DefaultPlan() string {
 	return s.defaultPlan

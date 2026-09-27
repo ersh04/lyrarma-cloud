@@ -13,22 +13,28 @@ import (
 
 // InfoHandler returns system-wide and user-specific limits.
 type InfoHandler struct {
-	store  *storage.SQLStore
-	limits config.UserLimitSet
-	logger *slog.Logger
+	store     *storage.SQLStore
+	userStore *storage.UserStore
+	limits    config.UserLimitSet
+	logger    *slog.Logger
 }
 
 type userLimitsResponse struct {
-	Level               string `json:"level"`
-	MaxUploadSize       int64  `json:"max_upload_size"`
-	MaxStorageSize      int64  `json:"max_storage_size"`
-	UsedStorageSize     int64  `json:"used_storage_size"`
-	ReservedStorageSize int64  `json:"reserved_storage_size"`
+	Plan                []string `json:"plan"`
+	MaxUploadSize       int64    `json:"max_upload_size"`
+	MaxStorageSize      int64    `json:"max_storage_size"`
+	UsedStorageSize     int64    `json:"used_storage_size"`
+	ReservedStorageSize int64    `json:"reserved_storage_size"`
 }
 
 // NewInfoHandler creates a handler for limit information.
-func NewInfoHandler(store *storage.SQLStore, limits config.UserLimitSet, logger *slog.Logger) *InfoHandler {
-	return &InfoHandler{store: store, limits: limits, logger: logger}
+func NewInfoHandler(
+	store *storage.SQLStore,
+	userStore *storage.UserStore,
+	limits config.UserLimitSet,
+	logger *slog.Logger,
+) *InfoHandler {
+	return &InfoHandler{store: store, userStore: userStore, limits: limits, logger: logger}
 }
 
 // MaxUploadSizeHandler returns the absolute system file-size limit.
@@ -41,20 +47,20 @@ func (h *InfoHandler) MaxUploadSizeHandler(c fiber.Ctx) {
 // UserLimitsHandler returns the authenticated user's current limits.
 func (h *InfoHandler) UserLimitsHandler(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
-	plan, err := h.store.GetUserPlan(c.Context(), userID)
+	plans, err := h.userStore.GetUserPlans(c.Context(), userID)
 	if err != nil {
 		if errors.Is(err, storage.ErrUserNotFound) {
 			httpresponse.WriteError(c, fiber.StatusUnauthorized, "unauthorized", "user no longer exists")
 			return
 		}
-		h.logger.Error("failed to retrieve user plan", "user_id", userID, "err", err)
+		h.logger.Error("failed to retrieve user plans", "user_id", userID, "err", err)
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "failed to retrieve user limits")
 		return
 	}
 
-	limits, err := h.limits.For(plan)
+	limits, err := h.limits.ForPlans(plans)
 	if err != nil {
-		h.logger.Error("user limits are not configured", "user_id", userID, "plan", plan, "err", err)
+		h.logger.Error("user limits are not configured", "user_id", userID, "plan", plans, "err", err)
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "internal_error", "failed to retrieve user limits")
 		return
 	}
@@ -67,7 +73,7 @@ func (h *InfoHandler) UserLimitsHandler(c fiber.Ctx) {
 	}
 
 	httpresponse.WriteJSON(c, fiber.StatusOK, userLimitsResponse{
-		Level:               plan,
+		Plan:                plans,
 		MaxUploadSize:       limits.MaxFileBytes(),
 		MaxStorageSize:      limits.MaxStorageBytes(),
 		UsedStorageSize:     usedBytes,

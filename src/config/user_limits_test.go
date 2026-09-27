@@ -63,6 +63,57 @@ func TestUserLimitSetAcceptsArbitraryPlanNames(t *testing.T) {
 	}
 }
 
+func TestUserLimitSetCombinesAssignedPlans(t *testing.T) {
+	storagePlan, err := NewUserLimits(30_000, 1_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadPlan, err := NewUserLimits(10_000, 3_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitSet, err := NewUserLimitSet(
+		30_000,
+		3_000,
+		"storage",
+		map[string]UserLimits{"storage": storagePlan, "upload": uploadPlan},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	combined, err := limitSet.ForPlans([]string{"storage", "upload", "storage"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if combined.MaxStorageBytes() != 30_000 || combined.MaxFileBytes() != 3_000 {
+		t.Fatalf(
+			"unexpected combined limits: storage=%d file=%d",
+			combined.MaxStorageBytes(),
+			combined.MaxFileBytes(),
+		)
+	}
+}
+
+func TestUserLimitSetRejectsEmptyPlanList(t *testing.T) {
+	limits, err := NewUserLimits(10_000, 1_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitSet, err := NewUserLimitSet(
+		10_000,
+		1_000,
+		"basic",
+		map[string]UserLimits{"basic": limits},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := limitSet.ForPlans(nil); err == nil {
+		t.Fatal("expected an empty plan list error")
+	}
+}
+
 func TestUserLimitSetRejectsPlanAboveHardLimit(t *testing.T) {
 	limits, err := NewUserLimits(10_000, 2_000)
 	if err != nil {

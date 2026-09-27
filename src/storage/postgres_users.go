@@ -15,7 +15,6 @@ func (s *SQLStore) EnsureUserProfile(profile models.UserProfile) (models.UserPro
 		context.Background(),
 		insertUserProfileSQL,
 		profile.ID,
-		s.defaultPlan,
 		profile.CreatedAt,
 	)
 	if err != nil {
@@ -32,17 +31,4 @@ func (s *SQLStore) EnsureUserProfile(profile models.UserProfile) (models.UserPro
 		return models.UserProfile{}, fmt.Errorf("find user profile: %w", err)
 	}
 	return stored, nil
-}
-
-// GetUserPlan returns the user's current service plan.
-func (s *SQLStore) GetUserPlan(ctx context.Context, id string) (string, error) {
-	var plan string
-	err := s.db.QueryRow(ctx, selectUserPlanSQL, id).Scan(&plan)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrUserNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("find user service plan: %w", err)
-	}
-	return plan, nil
 }

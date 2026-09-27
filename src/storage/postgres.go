@@ -2,10 +2,8 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -106,8 +104,6 @@ const (
 	createUsersTableSQL = `
 		CREATE TABLE IF NOT EXISTS users (
 			id         TEXT PRIMARY KEY,
-			plan       TEXT NOT NULL
-				CONSTRAINT users_plan_name_check CHECK (plan ~ '^[a-z][a-z0-9_-]{0,31}$'),
 			created_at TIMESTAMPTZ NOT NULL
 		)
 	`
@@ -136,45 +132,6 @@ const (
 		$$
 	`
 
-	addUserPlanColumnSQL = `
-		ALTER TABLE users
-		ADD COLUMN IF NOT EXISTS plan TEXT
-	`
-	dropLegacyUserPlanConstraintSQL = `
-		ALTER TABLE users
-		DROP CONSTRAINT IF EXISTS users_plan_check
-	`
-	backfillUserPlanSQL = `
-		UPDATE users
-		SET plan = $1
-		WHERE plan IS NULL OR BTRIM(plan) = ''
-	`
-	dropUserPlanDefaultSQL = `
-		ALTER TABLE users
-		ALTER COLUMN plan DROP DEFAULT
-	`
-	setUserPlanNotNullSQL = `
-		ALTER TABLE users
-		ALTER COLUMN plan SET NOT NULL
-	`
-	addUserPlanNameConstraintSQL = `
-		DO $$
-		BEGIN
-			ALTER TABLE users
-			ADD CONSTRAINT users_plan_name_check
-			CHECK (plan ~ '^[a-z][a-z0-9_-]{0,31}$');
-		EXCEPTION
-			WHEN duplicate_object THEN NULL;
-		END;
-		$$
-	`
-	selectUnknownUserPlanSQL = `
-		SELECT plan
-		FROM users
-		WHERE NOT (plan = ANY($1::text[]))
-		LIMIT 1
-	`
-
 	createUploadReservationsTableSQL = `
 		CREATE TABLE IF NOT EXISTS upload_reservations (
 			id         TEXT PRIMARY KEY,
@@ -192,31 +149,24 @@ const (
 		WHERE created_at < NOW() - INTERVAL '24 hours'
 	`
 
-	insertUserProfileSQL = `INSERT INTO users (id, plan, created_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING`
+	insertUserProfileSQL = `INSERT INTO users (id, created_at) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`
 	selectUserProfileSQL = `SELECT id, created_at FROM users WHERE id = $1`
-	selectUserPlanSQL    = `SELECT plan FROM users WHERE id = $1`
 )
 
 // SQLStore contains a PostgreSQL connection and a data directory.
 type SQLStore struct {
-	db          *pgxpool.Pool
-	dataDir     string
-	defaultPlan string
+	db      *pgxpool.Pool
+	dataDir string
 }
 
-func New(
-	dataDir string,
-	databaseURL string,
-	defaultPlan string,
-	configuredPlans []string,
-) (*SQLStore, error) {
+func New(dataDir string, databaseURL string) (*SQLStore, error) {
 	db, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	store := &SQLStore{db: db, dataDir: dataDir, defaultPlan: defaultPlan}
-	if err := store.init(defaultPlan, configuredPlans); err != nil {
+	store := &SQLStore{db: db, dataDir: dataDir}
+	if err := store.init(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -230,7 +180,7 @@ func (s *SQLStore) Close() {
 	}
 }
 
-func (s *SQLStore) init(defaultPlan string, configuredPlans []string) error {
+func (s *SQLStore) init() error {
 	ctx := context.Background()
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -247,40 +197,6 @@ func (s *SQLStore) init(defaultPlan string, configuredPlans []string) error {
 	_, err = tx.Exec(ctx, makeLegacyIdentityColumnsNullableSQL)
 	if err != nil {
 		return err
-	}
-
-	_, err = tx.Exec(ctx, addUserPlanColumnSQL)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, dropLegacyUserPlanConstraintSQL)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, backfillUserPlanSQL, defaultPlan)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, dropUserPlanDefaultSQL)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, setUserPlanNotNullSQL)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, addUserPlanNameConstraintSQL)
-	if err != nil {
-		return err
-	}
-
-	var unknownPlan string
-	err = tx.QueryRow(ctx, selectUnknownUserPlanSQL, configuredPlans).Scan(&unknownPlan)
-	if err == nil {
-		return fmt.Errorf("database contains unconfigured service plan %q", unknownPlan)
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("validate configured service plans: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, createFilesTableSQL)

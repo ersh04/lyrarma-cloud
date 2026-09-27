@@ -23,6 +23,7 @@ import (
 // FileHandler manages file operations and connects PostgreSQL with S3.
 type FileHandler struct {
 	metadataStore *storage.SQLStore
+	userStore     *storage.UserStore
 	s3Storage     *storage.S3Store
 	limits        config.UserLimitSet
 	logger        *slog.Logger
@@ -31,12 +32,14 @@ type FileHandler struct {
 // NewFileHandler creates a file handler with the provided dependencies.
 func NewFileHandler(
 	metadataStore *storage.SQLStore,
+	userStore *storage.UserStore,
 	s3Storage *storage.S3Store,
 	limits config.UserLimitSet,
 	logger *slog.Logger,
 ) *FileHandler {
 	return &FileHandler{
 		metadataStore: metadataStore,
+		userStore:     userStore,
 		s3Storage:     s3Storage,
 		limits:        limits,
 		logger:        logger,
@@ -373,11 +376,11 @@ func (h *FileHandler) handleFileLookupError(
 }
 
 func (h *FileHandler) userLimits(ctx context.Context, userID string) (config.UserLimits, error) {
-	plan, err := h.metadataStore.GetUserPlan(ctx, userID)
+	plans, err := h.userStore.GetUserPlans(ctx, userID)
 	if err != nil {
 		return config.UserLimits{}, err
 	}
-	return h.limits.For(plan)
+	return h.limits.ForPlans(plans)
 }
 
 func fileObjectKey(ownerID, fileID string) string {

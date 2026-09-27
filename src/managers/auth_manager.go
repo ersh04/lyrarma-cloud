@@ -28,6 +28,7 @@ type AuthHandler struct {
 	userStore       *storage.UserStore
 	jwt             config.JWTConfig
 	registrationKey string
+	defaultPlan     string
 	logger          *slog.Logger
 }
 
@@ -37,6 +38,7 @@ func NewAuthHandler(
 	userStore *storage.UserStore,
 	jwtConfig config.JWTConfig,
 	registrationKey string,
+	defaultPlan string,
 	logger *slog.Logger,
 ) *AuthHandler {
 	return &AuthHandler{
@@ -44,6 +46,7 @@ func NewAuthHandler(
 		userStore:       userStore,
 		jwt:             jwtConfig,
 		registrationKey: registrationKey,
+		defaultPlan:     defaultPlan,
 		logger:          logger,
 	}
 }
@@ -103,6 +106,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 		Username: request.Username,
 		Password: string(hash),
 		Email:    request.Email,
+		Plan:     []string{h.defaultPlan},
 	}
 	if err := h.userStore.CreateUser(user); err != nil {
 		if errors.Is(err, storage.ErrUserAlreadyExists) {

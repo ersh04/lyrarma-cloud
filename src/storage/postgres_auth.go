@@ -19,10 +19,12 @@ const (
 			id       TEXT,
 			username TEXT NOT NULL,
 			password TEXT NOT NULL,
-			email    TEXT NOT NULL CONSTRAINT users_email_unique UNIQUE
+			email    TEXT NOT NULL CONSTRAINT users_email_unique UNIQUE,
+			plan     TEXT[]
 		)
 	`
 	addAuthUserIDSQL    = `ALTER TABLE users ADD COLUMN IF NOT EXISTS id TEXT`
+	addAuthUserPlanSQL  = `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT[]`
 	selectAuthSchemaSQL = `
 		SELECT COALESCE(string_agg(column_name, ',' ORDER BY column_name), '')
 		FROM information_schema.columns
@@ -40,15 +42,40 @@ const (
 			AND tc.table_name = 'users'
 			AND tc.constraint_type = 'PRIMARY KEY'
 	`
-	createAuthUsernameIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users (username)`
-	setAuthUserIDNotNullSQL    = `ALTER TABLE users ALTER COLUMN id SET NOT NULL`
-	addAuthUsersPrimaryKeySQL  = `ALTER TABLE users ADD CONSTRAINT users_pkey PRIMARY KEY (id)`
-	insertAuthUserSQL          = `INSERT INTO users (id, username, password, email) VALUES ($1, $2, $3, $4)`
-	selectAuthUserSQL          = `SELECT id, username, password, email FROM users WHERE username = $1`
-	deleteAuthUserSQL          = `DELETE FROM users WHERE id = $1 AND username = $2 AND email = $3`
-	selectMissingUserIDsSQL    = `SELECT username FROM users WHERE id IS NULL OR BTRIM(id) = ''`
-	updateAuthUserIDSQL        = `UPDATE users SET id = $1 WHERE username = $2`
-	selectAuthUserLinksSQL     = `SELECT id, username FROM users`
+	createAuthUsernameIndexSQL   = `CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users (username)`
+	setAuthUserIDNotNullSQL      = `ALTER TABLE users ALTER COLUMN id SET NOT NULL`
+	setAuthUserPlanNotNullSQL    = `ALTER TABLE users ALTER COLUMN plan SET NOT NULL`
+	addAuthUsersPrimaryKeySQL    = `ALTER TABLE users ADD CONSTRAINT users_pkey PRIMARY KEY (id)`
+	addAuthUserPlanConstraintSQL = `
+		DO $$
+		BEGIN
+			ALTER TABLE users
+			ADD CONSTRAINT users_plan_nonempty_check
+			CHECK (
+				array_ndims(plan) = 1
+				AND cardinality(plan) > 0
+				AND array_position(plan, NULL) IS NULL
+			);
+		EXCEPTION
+			WHEN duplicate_object THEN NULL;
+		END;
+		$$
+	`
+	insertAuthUserSQL        = `INSERT INTO users (id, username, password, email, plan) VALUES ($1, $2, $3, $4, $5)`
+	selectAuthUserSQL        = `SELECT id, username, password, email, plan FROM users WHERE username = $1`
+	selectAuthUserPlansSQL   = `SELECT plan FROM users WHERE id = $1`
+	deleteAuthUserSQL        = `DELETE FROM users WHERE id = $1 AND username = $2 AND email = $3`
+	selectMissingUserIDsSQL  = `SELECT username FROM users WHERE id IS NULL OR BTRIM(id) = ''`
+	updateAuthUserIDSQL      = `UPDATE users SET id = $1 WHERE username = $2`
+	selectAuthUserLinksSQL   = `SELECT id, username FROM users`
+	backfillAuthUserPlansSQL = `UPDATE users SET plan = ARRAY[$1]::text[] WHERE plan IS NULL OR cardinality(plan) = 0`
+	selectUnknownAuthPlanSQL = `
+		SELECT id, COALESCE(plan_name, '')
+		FROM users
+		CROSS JOIN LATERAL unnest(plan) AS plan_name
+		WHERE plan_name IS NULL OR NOT (plan_name = ANY($1::text[]))
+		LIMIT 1
+	`
 )
 
 var (
@@ -59,17 +86,29 @@ var (
 
 // UserStore stores identifiers and data required to authenticate users.
 type UserStore struct {
-	db *pgxpool.Pool
+	db              *pgxpool.Pool
+	defaultPlan     string
+	configuredPlans []string
+	planNames       map[string]struct{}
 }
 
 // NewUserStore connects to lyrarma-services-users and prepares its schema.
-func NewUserStore(databaseURL string) (*UserStore, error) {
+func NewUserStore(databaseURL, defaultPlan string, configuredPlans []string) (*UserStore, error) {
 	db, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	store := &UserStore{db: db}
+	planNames := make(map[string]struct{}, len(configuredPlans))
+	for _, plan := range configuredPlans {
+		planNames[plan] = struct{}{}
+	}
+	store := &UserStore{
+		db:              db,
+		defaultPlan:     defaultPlan,
+		configuredPlans: append([]string(nil), configuredPlans...),
+		planNames:       planNames,
+	}
 	if err := store.init(); err != nil {
 		db.Close()
 		return nil, err
@@ -85,13 +124,16 @@ func (s *UserStore) init() error {
 	if _, err := s.db.Exec(ctx, addAuthUserIDSQL); err != nil {
 		return fmt.Errorf("add authentication user ID: %w", err)
 	}
+	if _, err := s.db.Exec(ctx, addAuthUserPlanSQL); err != nil {
+		return fmt.Errorf("add authentication user plan list: %w", err)
+	}
 
 	var columns string
 	if err := s.db.QueryRow(ctx, selectAuthSchemaSQL).Scan(&columns); err != nil {
 		return fmt.Errorf("read authentication users schema: %w", err)
 	}
-	if columns != "email,id,password,username" {
-		return fmt.Errorf("authentication users table must contain only id, username, password and email columns; got %q", columns)
+	if columns != "email,id,password,plan,username" {
+		return fmt.Errorf("authentication users table must contain only id, username, password, email and plan columns; got %q", columns)
 	}
 	return nil
 }
@@ -105,7 +147,18 @@ func (s *UserStore) Close() {
 
 // CreateUser stores a new user account.
 func (s *UserStore) CreateUser(user models.User) error {
-	_, err := s.db.Exec(context.Background(), insertAuthUserSQL, user.ID, user.Username, user.Password, user.Email)
+	if err := s.validateAssignedPlans(user.Plan); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(
+		context.Background(),
+		insertAuthUserSQL,
+		user.ID,
+		user.Username,
+		user.Password,
+		user.Email,
+		user.Plan,
+	)
 	if err == nil {
 		return nil
 	}
@@ -124,7 +177,7 @@ func (s *UserStore) CreateUser(user models.User) error {
 func (s *UserStore) GetUserByUsername(username string) (models.User, error) {
 	var user models.User
 	err := s.db.QueryRow(context.Background(), selectAuthUserSQL, username).
-		Scan(&user.ID, &user.Username, &user.Password, &user.Email)
+		Scan(&user.ID, &user.Username, &user.Password, &user.Email, &user.Plan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.User{}, ErrUserNotFound
 	}
@@ -132,6 +185,19 @@ func (s *UserStore) GetUserByUsername(username string) (models.User, error) {
 		return models.User{}, fmt.Errorf("find authentication user: %w", err)
 	}
 	return user, nil
+}
+
+// GetUserPlans returns the service plans assigned to an authentication user.
+func (s *UserStore) GetUserPlans(ctx context.Context, id string) ([]string, error) {
+	var plans []string
+	err := s.db.QueryRow(ctx, selectAuthUserPlansSQL, id).Scan(&plans)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user service plans: %w", err)
+	}
+	return append([]string(nil), plans...), nil
 }
 
 // DeleteUser removes an account only when its ID, username, and email match.
@@ -192,6 +258,8 @@ func (s *UserStore) finalizeSchema(ctx context.Context) error {
 	statements := []string{
 		createAuthUsernameIndexSQL,
 		setAuthUserIDNotNullSQL,
+		setAuthUserPlanNotNullSQL,
+		addAuthUserPlanConstraintSQL,
 	}
 	if primaryKeyColumns != "id" {
 		if primaryKeyName != "" {
@@ -210,6 +278,34 @@ func (s *UserStore) finalizeSchema(ctx context.Context) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit authentication schema migration: %w", err)
+	}
+	return nil
+}
+
+func (s *UserStore) backfillAndValidatePlans(ctx context.Context) error {
+	if _, err := s.db.Exec(ctx, backfillAuthUserPlansSQL, s.defaultPlan); err != nil {
+		return fmt.Errorf("assign default authentication user plans: %w", err)
+	}
+
+	var id, plan string
+	err := s.db.QueryRow(ctx, selectUnknownAuthPlanSQL, s.configuredPlans).Scan(&id, &plan)
+	if err == nil {
+		return fmt.Errorf("authentication user %q has unconfigured service plan %q", id, plan)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("validate authentication user plans: %w", err)
+	}
+	return nil
+}
+
+func (s *UserStore) validateAssignedPlans(plans []string) error {
+	if len(plans) == 0 {
+		return fmt.Errorf("at least one service plan must be assigned")
+	}
+	for _, plan := range plans {
+		if _, exists := s.planNames[plan]; !exists {
+			return fmt.Errorf("service plan %q is not configured", plan)
+		}
 	}
 	return nil
 }

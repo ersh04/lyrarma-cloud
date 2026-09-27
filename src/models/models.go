@@ -21,6 +21,9 @@ type User struct {
 
 	// Email is the unique email address associated with the account.
 	Email string `json:"email"`
+
+	// Plan contains the service plans assigned to the account.
+	Plan []string `json:"plan"`
 }
 
 // UserProfile links an authenticated user to cloud storage data.

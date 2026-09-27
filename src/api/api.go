@@ -28,16 +28,15 @@ func New(cfg config.Config, logger *slog.Logger) (*API, error) {
 
 	storageConfig := cfg.Storage()
 	limits := cfg.UserLimits()
-	store, err := storage.New(
-		storageConfig.DataDir(),
-		cfg.DatabaseURL(),
-		limits.DefaultPlan(),
-		limits.PlanNames(),
-	)
+	store, err := storage.New(storageConfig.DataDir(), cfg.DatabaseURL())
 	if err != nil {
 		return nil, err
 	}
-	userStore, err := storage.NewUserStore(cfg.UsersDatabaseURL())
+	userStore, err := storage.NewUserStore(
+		cfg.UsersDatabaseURL(),
+		limits.DefaultPlan(),
+		limits.PlanNames(),
+	)
 	if err != nil {
 		store.Close()
 		return nil, err
@@ -89,10 +88,17 @@ func (a *API) App() *fiber.App {
 func (a *API) registerRoutes(cfg config.Config, logger *slog.Logger) {
 	jwtConfig := cfg.JWT()
 	limits := cfg.UserLimits()
-	authHandler := managers.NewAuthHandler(a.store, a.userStore, jwtConfig, cfg.BetaTestKey(), logger)
-	fileHandler := managers.NewFileHandler(a.store, a.s3Store, limits, logger)
+	authHandler := managers.NewAuthHandler(
+		a.store,
+		a.userStore,
+		jwtConfig,
+		cfg.BetaTestKey(),
+		limits.DefaultPlan(),
+		logger,
+	)
+	fileHandler := managers.NewFileHandler(a.store, a.userStore, a.s3Store, limits, logger)
 	folderHandler := managers.NewFolderHandler(a.store, a.s3Store, logger)
-	infoHandler := managers.NewInfoHandler(a.store, limits, logger)
+	infoHandler := managers.NewInfoHandler(a.store, a.userStore, limits, logger)
 	requireAuth := middleware.RequireAuth(jwtConfig.Secret())
 
 	// Service health check route.
