@@ -1,4 +1,4 @@
-// Package middleware provides middleware for handling HTTP requests.
+// Package middleware provides middleware for handling HTTP requests
 package middleware
 
 import (
@@ -11,21 +11,21 @@ import (
 	"github.com/lyrarma/cloud-api/src/httpresponse"
 )
 
-// ContextKey defines the type used for context value keys.
+// ContextKey defines the type used for context value keys
 type ContextKey string
 
 const (
-	// ContextKeyUserID stores the authenticated user identifier.
+	// ContextKeyUserID stores the authenticated user identifier
 	ContextKeyUserID ContextKey = "userID"
 )
 
-// Claims extends the standard JWT claims with a user identifier.
+// Claims extends the standard JWT claims with a user identifier
 type Claims struct {
 	UserID string `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-// RequireAuth validates the JWT and adds the user identifier to the request context.
+// RequireAuth validates the JWT and adds the user identifier to the request context
 func RequireAuth(jwtSecret string) func(c fiber.Ctx) error {
 	return func(c fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
@@ -61,7 +61,7 @@ func RequireAuth(jwtSecret string) func(c fiber.Ctx) error {
 	}
 }
 
-// UserIDFromContext returns the user identifier from the context.
+// UserIDFromContext returns the user identifier from the context
 func UserIDFromContext(ctx context.Context) string {
 	userID, _ := ctx.Value(ContextKeyUserID).(string)
 	return userID

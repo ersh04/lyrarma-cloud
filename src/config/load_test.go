@@ -77,6 +77,15 @@ func TestLoadRejectsUnknownPlanProperty(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsSharedQuarantineBucket(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(s3QuarantineBucketEnv, "test-bucket")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected quarantine bucket to differ from the files bucket")
+	}
+}
+
 func TestLoadRejectsInsecureConfigurationFilePermissions(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "insecure.env")
 	if err := os.WriteFile(configPath, nil, 0o600); err != nil {
@@ -101,17 +110,18 @@ func setValidEnvironment(t *testing.T) {
 	}
 
 	values := map[string]string{
-		configFileEnv:       configPath,
-		databaseURLEnv:      "postgres://localhost/test",
-		usersDatabaseURLEnv: "postgres://localhost/lyrarma-services-users",
-		betaTestKeyEnv:      "0123456789abcdef",
-		cloudJWTSecretEnv:   "0123456789abcdef0123456789abcdef",
-		s3BucketEnv:         "test-bucket",
-		s3RegionEnv:         "test-region",
-		hardMaxUploadMBEnv:  "20",
-		hardMaxStorageMBEnv: "1000",
-		defaultUserPlanEnv:  "user",
-		userPlansJSONEnv:    "[{\"name\":\"user\",\"max_upload_mb\":5,\"max_storage_mb\":100},{\"name\":\"premium\",\"max_upload_mb\":10,\"max_storage_mb\":500},{\"name\":\"enterprise-v2\",\"max_upload_mb\":20,\"max_storage_mb\":1000}]",
+		configFileEnv:         configPath,
+		databaseURLEnv:        "postgres://localhost/test",
+		usersDatabaseURLEnv:   "postgres://localhost/lyrarma-services-users",
+		betaTestKeyEnv:        "0123456789abcdef",
+		cloudJWTSecretEnv:     "0123456789abcdef0123456789abcdef",
+		s3BucketEnv:           "test-bucket",
+		s3QuarantineBucketEnv: "test-quarantine-bucket",
+		s3RegionEnv:           "test-region",
+		hardMaxUploadMBEnv:    "20",
+		hardMaxStorageMBEnv:   "1000",
+		defaultUserPlanEnv:    "user",
+		userPlansJSONEnv:      "[{\"name\":\"user\",\"max_upload_mb\":5,\"max_storage_mb\":100},{\"name\":\"premium\",\"max_upload_mb\":10,\"max_storage_mb\":500},{\"name\":\"enterprise-v2\",\"max_upload_mb\":20,\"max_storage_mb\":1000}]",
 	}
 	for name, value := range values {
 		t.Setenv(name, value)

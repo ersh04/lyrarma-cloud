@@ -10,7 +10,7 @@ const (
 	maxPlanNameBytes             = 32
 )
 
-// ParsePlanName validates and returns a canonical service plan name.
+// ParsePlanName validates and returns a canonical service plan name
 func ParsePlanName(value string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("service plan name cannot be empty")
@@ -35,13 +35,13 @@ func ParsePlanName(value string) (string, error) {
 	return value, nil
 }
 
-// UserLimits contains validated limits for one service plan.
+// UserLimits contains validated limits for one service plan
 type UserLimits struct {
 	maxStorageBytes int64
 	maxFileBytes    int64
 }
 
-// NewUserLimits creates validated limits for one service plan.
+// NewUserLimits creates validated limits for one service plan
 func NewUserLimits(maxStorageBytes, maxFileBytes int64) (UserLimits, error) {
 	if maxStorageBytes <= 0 {
 		return UserLimits{}, fmt.Errorf("storage limit must be positive")
@@ -58,12 +58,12 @@ func NewUserLimits(maxStorageBytes, maxFileBytes int64) (UserLimits, error) {
 func (l UserLimits) MaxStorageBytes() int64 { return l.maxStorageBytes }
 func (l UserLimits) MaxFileBytes() int64    { return l.maxFileBytes }
 
-// AllowsFile reports whether a file size fits the service plan limit.
+// AllowsFile reports whether a file size fits the service plan limit
 func (l UserLimits) AllowsFile(size int64) bool {
 	return size >= 0 && size <= l.maxFileBytes
 }
 
-// UserLimitSet stores immutable system limits and a dynamic service plan catalog.
+// UserLimitSet stores immutable system limits and a dynamic service plan catalog
 type UserLimitSet struct {
 	hardMaxStorageBytes int64
 	hardMaxFileBytes    int64
@@ -71,7 +71,7 @@ type UserLimitSet struct {
 	plans               map[string]UserLimits
 }
 
-// NewUserLimitSet creates a validated immutable limit set.
+// NewUserLimitSet creates a validated immutable limit set
 func NewUserLimitSet(
 	hardMaxStorageBytes int64,
 	hardMaxFileBytes int64,
@@ -126,7 +126,7 @@ func NewUserLimitSet(
 	}, nil
 }
 
-// For returns an independent copy of the requested service plan limits.
+// For returns an independent copy of the requested service plan limits
 func (s UserLimitSet) For(plan string) (UserLimits, error) {
 	plan, err := ParsePlanName(plan)
 	if err != nil {
@@ -139,7 +139,7 @@ func (s UserLimitSet) For(plan string) (UserLimits, error) {
 	return limits, nil
 }
 
-// ForPlans combines assigned plans by taking the highest value for each limit.
+// ForPlans combines assigned plans by taking the highest value for each limit
 func (s UserLimitSet) ForPlans(plans []string) (UserLimits, error) {
 	if len(plans) == 0 {
 		return UserLimits{}, fmt.Errorf("at least one service plan must be assigned")
@@ -167,12 +167,12 @@ func (s UserLimitSet) ForPlans(plans []string) (UserLimits, error) {
 	return combined, nil
 }
 
-// DefaultPlan returns the plan assigned to newly registered users.
+// DefaultPlan returns the plan assigned to newly registered users
 func (s UserLimitSet) DefaultPlan() string {
 	return s.defaultPlan
 }
 
-// PlanNames returns a sorted independent copy of configured plan names.
+// PlanNames returns a sorted independent copy of configured plan names
 func (s UserLimitSet) PlanNames() []string {
 	names := make([]string, 0, len(s.plans))
 	for name := range s.plans {
@@ -185,7 +185,7 @@ func (s UserLimitSet) PlanNames() []string {
 func (s UserLimitSet) HardMaxStorageBytes() int64 { return s.hardMaxStorageBytes }
 func (s UserLimitSet) HardMaxFileBytes() int64    { return s.hardMaxFileBytes }
 
-// RequestBodyLimit returns a safe Fiber multipart request limit.
+// RequestBodyLimit returns a safe Fiber multipart request limit
 func (s UserLimitSet) RequestBodyLimit() int {
 	return int(s.hardMaxFileBytes + multipartOverheadBytes)
 }

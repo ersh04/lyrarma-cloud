@@ -1,4 +1,4 @@
-package managers
+package handlers
 
 import (
 	"archive/zip"
@@ -21,14 +21,14 @@ import (
 	"github.com/lyrarma/cloud-api/src/storage"
 )
 
-// FolderHandler manages the folder hierarchy and bulk file operations.
+// FolderHandler manages the folder hierarchy and bulk file operations
 type FolderHandler struct {
 	metadataStore *storage.SQLStore
 	fileStore     *storage.S3Store
 	logger        *slog.Logger
 }
 
-// NewFolderHandler creates a folder handler with the provided dependencies.
+// NewFolderHandler creates a folder handler with the provided dependencies
 func NewFolderHandler(
 	metadataStore *storage.SQLStore,
 	fileStore *storage.S3Store,
@@ -41,7 +41,7 @@ func NewFolderHandler(
 	}
 }
 
-// List returns all folders belonging to the authenticated user.
+// List returns all folders belonging to the authenticated user
 func (h *FolderHandler) List(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	folders, err := h.metadataStore.ListFolders(c.Context(), userID)
@@ -56,7 +56,7 @@ func (h *FolderHandler) List(c fiber.Ctx) {
 	})
 }
 
-// Create creates a folder inside the selected parent folder.
+// Create creates a folder inside the selected parent folder
 func (h *FolderHandler) Create(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 
@@ -91,7 +91,7 @@ func (h *FolderHandler) Create(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusCreated, entry)
 }
 
-// ChangeFolderPermission changes whether a folder is public.
+// ChangeFolderPermission changes whether a folder is public
 func (h *FolderHandler) ChangeFolderPermission(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := strings.TrimSpace(c.Params("folderID"))
@@ -125,7 +125,7 @@ func (h *FolderHandler) ChangeFolderPermission(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, models.SuccessResponse{Message: "access permissions updated"})
 }
 
-// Delete removes a folder together with all its files and nested folders.
+// Delete removes a folder together with all its files and nested folders
 func (h *FolderHandler) Delete(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := strings.TrimSpace(c.Params("folderID"))
@@ -157,13 +157,24 @@ func (h *FolderHandler) Delete(c fiber.Ctx) {
 				"err", err,
 			)
 		}
+		if err := h.fileStore.DeleteQuarantineFile(
+			c.Context(),
+			fileObjectKey(entry.OwnerID, entry.ID),
+		); err != nil {
+			h.logger.Error(
+				"orphaned quarantine object after folder deletion",
+				"folder_id", folderID,
+				"file_id", entry.ID,
+				"err", err,
+			)
+		}
 	}
 
 	h.logger.Info("folder deleted", "folder_id", folderID, "user_id", userID, "files", len(files))
 	httpresponse.WriteJSON(c, fiber.StatusOK, models.SuccessResponse{Message: "folder deleted"})
 }
 
-// GetPublicFolderInfo returns metadata for a public folder.
+// GetPublicFolderInfo returns metadata for a public folder
 func (h *FolderHandler) GetPublicFolderInfo(c fiber.Ctx) {
 	folderID := strings.TrimSpace(c.Params("folderID"))
 	if folderID == "" {
@@ -184,7 +195,7 @@ func (h *FolderHandler) GetPublicFolderInfo(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, folder)
 }
 
-// DownloadPublicFolder streams a public folder as a ZIP archive.
+// DownloadPublicFolder streams a public folder as a ZIP archive
 func (h *FolderHandler) DownloadPublicFolder(c fiber.Ctx) {
 	folderID := strings.TrimSpace(c.Params("folderID"))
 	if folderID == "" {
@@ -275,6 +286,9 @@ func writeFolderArchive(
 	})
 
 	for _, entry := range files {
+		if entry.Status != models.FileApproved {
+			continue
+		}
 		folderPath, included := folderPaths[entry.FolderID]
 		if !included {
 			continue

@@ -1,4 +1,4 @@
-package managers
+package handlers
 
 import (
 	"crypto/rand"
@@ -22,7 +22,7 @@ import (
 	"github.com/lyrarma/cloud-api/src/storage"
 )
 
-// AuthHandler handles user registration and sign-in.
+// AuthHandler handles user registration and sign-in
 type AuthHandler struct {
 	cloudStore      *storage.SQLStore
 	userStore       *storage.UserStore
@@ -32,7 +32,7 @@ type AuthHandler struct {
 	logger          *slog.Logger
 }
 
-// NewAuthHandler creates an authentication handler with the provided dependencies.
+// NewAuthHandler creates an authentication handler with the provided dependencies
 func NewAuthHandler(
 	cloudStore *storage.SQLStore,
 	userStore *storage.UserStore,
@@ -51,7 +51,7 @@ func NewAuthHandler(
 	}
 }
 
-// Register creates a new user account.
+// Register creates a new user account
 func (h *AuthHandler) Register(c fiber.Ctx) {
 	var request models.RegisterRequest
 	if err := json.NewDecoder(c.Request().BodyStream()).Decode(&request); err != nil {
@@ -149,7 +149,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusCreated, models.SuccessResponse{Message: "user registered"})
 }
 
-// Login validates credentials and issues a JWT.
+// Login validates credentials and issues a JWT
 func (h *AuthHandler) Login(c fiber.Ctx) {
 	var request models.LoginRequest
 	if err := json.NewDecoder(c.Request().BodyStream()).Decode(&request); err != nil {
@@ -237,7 +237,7 @@ func validEmail(value string) bool {
 	return err == nil && address.Address == value && strings.Contains(value, "@")
 }
 
-// generateID creates a cryptographically random hexadecimal identifier.
+// generateID creates a cryptographically random hexadecimal identifier
 func generateID() string {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {

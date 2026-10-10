@@ -40,7 +40,7 @@ const (
 	`
 )
 
-// ReserveUpload atomically reserves space in a user's quota.
+// ReserveUpload atomically reserves space in a user's quota
 func (s *SQLStore) ReserveUpload(
 	ctx context.Context,
 	userID string,
@@ -98,7 +98,7 @@ func (s *SQLStore) ReserveUpload(
 	return nil
 }
 
-// ReleaseUploadReservation releases an existing quota reservation.
+// ReleaseUploadReservation releases an existing quota reservation
 func (s *SQLStore) ReleaseUploadReservation(ctx context.Context, userID, reservationID string) error {
 	if _, err := s.db.Exec(ctx, deleteUploadReservationSQL, reservationID, userID); err != nil {
 		return fmt.Errorf("release quota reservation: %w", err)
@@ -106,13 +106,16 @@ func (s *SQLStore) ReleaseUploadReservation(ctx context.Context, userID, reserva
 	return nil
 }
 
-// CommitReservedFile atomically stores file metadata and consumes its reservation.
+// CommitReservedFile atomically stores file metadata and consumes its reservation
 func (s *SQLStore) CommitReservedFile(
 	ctx context.Context,
 	entry models.FileEntry,
 	reservationID string,
 ) error {
 	entry.FolderID = models.NormalizeFolderID(entry.FolderID)
+	if !entry.Status.Valid() {
+		entry.Status = models.FileUploading
+	}
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -160,6 +163,7 @@ func (s *SQLStore) CommitReservedFile(
 		entry.Size,
 		entry.ContentType,
 		entry.IsPublic,
+		entry.Status,
 		entry.UploadedAt,
 	)
 	if err != nil {
@@ -174,7 +178,7 @@ func (s *SQLStore) CommitReservedFile(
 	return nil
 }
 
-// StorageUsage returns a user's used and reserved storage.
+// StorageUsage returns a user's used and reserved storage
 func (s *SQLStore) StorageUsage(ctx context.Context, userID string) (int64, int64, error) {
 	var usedBytes int64
 	var reservedBytes int64

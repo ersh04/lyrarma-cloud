@@ -1,4 +1,4 @@
-package managers
+package handlers
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"github.com/lyrarma/cloud-api/src/storage"
 )
 
-// FileHandler manages file operations and connects PostgreSQL with S3.
+// FileHandler manages file operations and connects PostgreSQL with S3
 type FileHandler struct {
 	metadataStore *storage.SQLStore
 	userStore     *storage.UserStore
@@ -29,7 +29,7 @@ type FileHandler struct {
 	logger        *slog.Logger
 }
 
-// NewFileHandler creates a file handler with the provided dependencies.
+// NewFileHandler creates a file handler with the provided dependencies
 func NewFileHandler(
 	metadataStore *storage.SQLStore,
 	userStore *storage.UserStore,
@@ -46,7 +46,7 @@ func NewFileHandler(
 	}
 }
 
-// FileList returns authenticated user files with optional folder filtering.
+// FileList returns authenticated user files with optional folder filtering
 func (h *FileHandler) FileList(c fiber.Ctx) error {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := models.NormalizeFolderID(c.Query("folder_id"))
@@ -66,7 +66,7 @@ func (h *FileHandler) FileList(c fiber.Ctx) error {
 	})
 }
 
-// UploadFile validates quota, uploads a multipart file to S3, and stores its metadata.
+// UploadFile validates quota, uploads a file to quarantine, and stores its metadata
 func (h *FileHandler) UploadFile(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	folderID := models.NormalizeFolderID(c.Query("folder_id"))
@@ -155,6 +155,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		OriginalName: fileName,
 		Size:         size,
 		ContentType:  contentType,
+		Status:       models.FileUploading,
 		UploadedAt:   time.Now().UTC(),
 	}
 	objectKey := fileObjectKey(entry.OwnerID, entry.ID)
@@ -187,7 +188,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 		}
 	}()
 
-	if err := h.s3Storage.UploadFile(c.Context(), objectKey, file, entry.ContentType); err != nil {
+	if err := h.s3Storage.UploadQuarantineFile(c.Context(), objectKey, file, entry.ContentType); err != nil {
 		h.logger.Error("file upload to S3 failed", "file_id", entry.ID, "user_id", userID, "err", err)
 		httpresponse.WriteError(c, fiber.StatusInternalServerError, "save_error", "failed to save file")
 		return
@@ -195,7 +196,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 
 	if err := h.metadataStore.CommitReservedFile(c.Context(), entry, reservationID); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		cleanupErr := h.s3Storage.DeleteFile(cleanupContext, objectKey)
+		cleanupErr := h.s3Storage.DeleteQuarantineFile(cleanupContext, objectKey)
 		cancel()
 		if cleanupErr != nil {
 			h.logger.Error("failed to roll back S3 upload", "file_id", entry.ID, "err", cleanupErr)
@@ -220,7 +221,7 @@ func (h *FileHandler) UploadFile(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusCreated, entry)
 }
 
-// DownloadFile sends the contents of a file to its owner.
+// DownloadFile sends the contents of a file to its owner
 func (h *FileHandler) DownloadFile(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))
@@ -234,10 +235,14 @@ func (h *FileHandler) DownloadFile(c fiber.Ctx) {
 		h.handleFileLookupError(c, "failed to retrieve file", fileID, err)
 		return
 	}
+	if entry.Status != models.FileApproved {
+		httpresponse.WriteError(c, fiber.StatusConflict, "file_unavailable", "file is not approved")
+		return
+	}
 	h.streamFile(c, entry)
 }
 
-// DownloadPublicFile sends a public file without authentication.
+// DownloadPublicFile sends a public file without authentication
 func (h *FileHandler) DownloadPublicFile(c fiber.Ctx) {
 	fileID := strings.TrimSpace(c.Params("fileID"))
 	if fileID == "" {
@@ -281,7 +286,7 @@ func (h *FileHandler) streamFile(c fiber.Ctx, entry models.FileEntry) {
 	}
 }
 
-// GetPublicFileInfo returns metadata for a public file.
+// GetPublicFileInfo returns metadata for a public file
 func (h *FileHandler) GetPublicFileInfo(c fiber.Ctx) {
 	fileID := strings.TrimSpace(c.Params("fileID"))
 	if fileID == "" {
@@ -297,7 +302,7 @@ func (h *FileHandler) GetPublicFileInfo(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, entry)
 }
 
-// FileInfo returns metadata for a file owned by the user.
+// FileInfo returns metadata for a file owned by the user
 func (h *FileHandler) FileInfo(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))
@@ -314,7 +319,7 @@ func (h *FileHandler) FileInfo(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, entry)
 }
 
-// DeleteFile removes file metadata and the corresponding S3 object.
+// DeleteFile removes metadata and objects from both S3 buckets
 func (h *FileHandler) DeleteFile(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))
@@ -329,15 +334,19 @@ func (h *FileHandler) DeleteFile(c fiber.Ctx) {
 		return
 	}
 
-	if err := h.s3Storage.DeleteFile(c.Context(), fileObjectKey(entry.OwnerID, entry.ID)); err != nil {
+	objectKey := fileObjectKey(entry.OwnerID, entry.ID)
+	if err := h.s3Storage.DeleteFile(c.Context(), objectKey); err != nil {
 		h.logger.Error("orphaned S3 object after metadata deletion", "file_id", entry.ID, "err", err)
+	}
+	if err := h.s3Storage.DeleteQuarantineFile(c.Context(), objectKey); err != nil {
+		h.logger.Error("orphaned quarantine object after metadata deletion", "file_id", entry.ID, "err", err)
 	}
 
 	h.logger.Info("file deleted", "file_id", fileID, "user_id", userID)
 	httpresponse.WriteJSON(c, fiber.StatusOK, models.SuccessResponse{Message: "file deleted"})
 }
 
-// ChangeFilePermission changes whether an owned file is public.
+// ChangeFilePermission changes whether an owned file is public
 func (h *FileHandler) ChangeFilePermission(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	fileID := strings.TrimSpace(c.Params("fileID"))

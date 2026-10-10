@@ -68,7 +68,7 @@ func (s *SQLStore) GetFolder(ctx context.Context, userID, folderID string) (mode
 	return entry, nil
 }
 
-// GetPublicFolder returns a public folder.
+// GetPublicFolder returns a public folder
 func (s *SQLStore) GetPublicFolder(ctx context.Context, folderID string) (models.FolderEntry, error) {
 	entry, err := scanFolder(s.db.QueryRow(ctx, selectPublicFolderSQL, folderID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -80,7 +80,7 @@ func (s *SQLStore) GetPublicFolder(ctx context.Context, folderID string) (models
 	return entry, nil
 }
 
-// ListFolders returns all folders belonging to a user.
+// ListFolders returns all folders belonging to a user
 func (s *SQLStore) ListFolders(ctx context.Context, userID string) ([]models.FolderEntry, error) {
 	rows, err := s.db.Query(ctx, listOwnedFoldersSQL, userID)
 	if err != nil {
@@ -118,7 +118,7 @@ func (s *SQLStore) UpdateFolderPermission(
 	return nil
 }
 
-// FolderTree returns a folder and all its descendants.
+// FolderTree returns a folder and all its descendants
 func (s *SQLStore) FolderTree(
 	ctx context.Context,
 	userID, folderID string,
@@ -143,7 +143,7 @@ func (s *SQLStore) FolderTree(
 	return entries, nil
 }
 
-// DeleteFolder removes a folder tree and returns metadata for the files it contained.
+// DeleteFolder removes a folder tree and returns metadata for the files it contained
 func (s *SQLStore) DeleteFolder(
 	ctx context.Context,
 	userID, folderID string,

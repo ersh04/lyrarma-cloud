@@ -1,4 +1,4 @@
-package managers
+package handlers
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"github.com/lyrarma/cloud-api/src/storage"
 )
 
-// InfoHandler returns system-wide and user-specific limits.
+// InfoHandler returns system-wide and user-specific limits
 type InfoHandler struct {
 	store     *storage.SQLStore
 	userStore *storage.UserStore
@@ -27,7 +27,7 @@ type userLimitsResponse struct {
 	ReservedStorageSize int64    `json:"reserved_storage_size"`
 }
 
-// NewInfoHandler creates a handler for limit information.
+// NewInfoHandler creates a handler for limit information
 func NewInfoHandler(
 	store *storage.SQLStore,
 	userStore *storage.UserStore,
@@ -37,14 +37,14 @@ func NewInfoHandler(
 	return &InfoHandler{store: store, userStore: userStore, limits: limits, logger: logger}
 }
 
-// MaxUploadSizeHandler returns the absolute system file-size limit.
+// MaxUploadSizeHandler returns the absolute system file-size limit
 func (h *InfoHandler) MaxUploadSizeHandler(c fiber.Ctx) {
 	httpresponse.WriteJSON(c, fiber.StatusOK, map[string]int64{
 		"max_upload_size": h.limits.HardMaxFileBytes(),
 	})
 }
 
-// UserLimitsHandler returns the authenticated user's current limits.
+// UserLimitsHandler returns the authenticated user's current limits
 func (h *InfoHandler) UserLimitsHandler(c fiber.Ctx) {
 	userID := middleware.UserIDFromContext(c.Context())
 	plans, err := h.userStore.GetUserPlans(c.Context(), userID)

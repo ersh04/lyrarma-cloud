@@ -35,11 +35,27 @@ const (
 	defaultUserPlanEnv       = "DEFAULT_USER_PLAN"
 	userPlansJSONEnv         = "USER_PLANS_JSON"
 	s3BucketEnv              = "S3_BUCKET"
+	s3QuarantineBucketEnv    = "S3_QUARANTINE_BUCKET"
 	s3RegionEnv              = "AWS_REGION"
 	s3EndpointEnv            = "S3_ENDPOINT"
 	s3AccessKeyIDEnv         = "AWS_ACCESS_KEY_ID"
 	s3SecretAccessKeyEnv     = "AWS_SECRET_ACCESS_KEY"
 	s3UsePathStyleEnv        = "S3_USE_PATH_STYLE"
+	scannerWorkersEnv        = "SCANNER_WORKERS"
+	scannerPollIntervalEnv   = "SCANNER_POLL_INTERVAL"
+	scannerTimeoutEnv        = "SCANNER_TIMEOUT"
+	scannerFileCommandEnv    = "SCANNER_FILE_COMMAND"
+	scannerAntivirusEnv      = "SCANNER_ANTIVIRUS_COMMAND"
+	scannerImageCommandEnv   = "SCANNER_IMAGE_COMMAND"
+	scannerVideoCommandEnv   = "SCANNER_VIDEO_COMMAND"
+	scannerFrameCommandEnv   = "SCANNER_FRAME_COMMAND"
+	scannerArchiveCommandEnv = "SCANNER_ARCHIVE_COMMAND"
+	scannerModerationEnv     = "SCANNER_MODERATION_COMMAND"
+	scannerArchiveDepthEnv   = "SCANNER_MAX_ARCHIVE_DEPTH"
+	scannerArchiveFilesEnv   = "SCANNER_MAX_ARCHIVE_FILES"
+	scannerArchiveSizeMBEnv  = "SCANNER_MAX_ARCHIVE_MB"
+	scannerMaxImagePixelsEnv = "SCANNER_MAX_IMAGE_PIXELS"
+	scannerBlockedMIMEsEnv   = "SCANNER_BLOCKED_MIME_TYPES"
 	mebibyte                 = int64(1024 * 1024)
 )
 
@@ -54,7 +70,7 @@ type planJSONConfig struct {
 	MaxStorageMB int64  `json:"max_storage_mb"`
 }
 
-// Load reads, validates, and returns one immutable configuration snapshot.
+// Load reads, validates, and returns one immutable configuration snapshot
 func Load() (Config, error) {
 	values, err := loadDotEnv()
 	if err != nil {
@@ -81,17 +97,45 @@ func Load() (Config, error) {
 			cookieSameSite: "Lax",
 		},
 		storage: StorageConfig{
-			dataDir:         value(values, cloudDataDirEnv, "./data"),
-			bucket:          value(values, s3BucketEnv, ""),
-			region:          value(values, s3RegionEnv, ""),
-			endpoint:        value(values, s3EndpointEnv, ""),
-			accessKeyID:     value(values, s3AccessKeyIDEnv, ""),
-			secretAccessKey: value(values, s3SecretAccessKeyEnv, ""),
-			usePathStyle:    true,
+			dataDir:          value(values, cloudDataDirEnv, "./data"),
+			bucket:           value(values, s3BucketEnv, ""),
+			quarantineBucket: value(values, s3QuarantineBucketEnv, ""),
+			region:           value(values, s3RegionEnv, ""),
+			endpoint:         value(values, s3EndpointEnv, ""),
+			accessKeyID:      value(values, s3AccessKeyIDEnv, ""),
+			secretAccessKey:  value(values, s3SecretAccessKeyEnv, ""),
+			usePathStyle:     true,
 		},
 		jwt: JWTConfig{
 			secret:   value(values, cloudJWTSecretEnv, ""),
 			tokenTTL: 24 * time.Hour,
+		},
+		scanner: ScannerConfig{
+			workerCount:       2,
+			pollInterval:      2 * time.Second,
+			timeout:           10 * time.Minute,
+			fileCommand:       value(values, scannerFileCommandEnv, "file"),
+			antivirusCommand:  value(values, scannerAntivirusEnv, "clamdscan"),
+			imageCommand:      value(values, scannerImageCommandEnv, "identify"),
+			videoCommand:      value(values, scannerVideoCommandEnv, "ffprobe"),
+			frameCommand:      value(values, scannerFrameCommandEnv, "ffmpeg"),
+			archiveCommand:    value(values, scannerArchiveCommandEnv, "7z"),
+			moderationCommand: value(values, scannerModerationEnv, ""),
+			maxArchiveDepth:   5,
+			maxArchiveFiles:   10000,
+			maxArchiveBytes:   5 * 1024 * 1024 * 1024,
+			maxImagePixels:    100_000_000,
+			blockedMIMETypes: []string{
+				"application/x-dosexec",
+				"application/x-executable",
+				"application/x-elf",
+				"application/x-mach-binary",
+				"application/x-object",
+				"application/x-pie-executable",
+				"application/x-sharedlib",
+				"application/x-msdownload",
+				"application/vnd.microsoft.portable-executable",
+			},
 		},
 		databaseURL: value(values, databaseURLEnv, ""),
 		usersDBURL:  value(values, usersDatabaseURLEnv, ""),
@@ -118,6 +162,30 @@ func Load() (Config, error) {
 	}
 	if cfg.jwt.tokenTTL, err = positiveDurationValue(values, cloudJWTTokenTTLEnv, cfg.jwt.tokenTTL); err != nil {
 		return Config{}, err
+	}
+	if cfg.scanner.workerCount, err = positiveIntegerValue(values, scannerWorkersEnv, cfg.scanner.workerCount); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.pollInterval, err = positiveDurationValue(values, scannerPollIntervalEnv, cfg.scanner.pollInterval); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.timeout, err = positiveDurationValue(values, scannerTimeoutEnv, cfg.scanner.timeout); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.maxArchiveDepth, err = positiveIntegerValue(values, scannerArchiveDepthEnv, cfg.scanner.maxArchiveDepth); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.maxArchiveFiles, err = positiveIntegerValue(values, scannerArchiveFilesEnv, cfg.scanner.maxArchiveFiles); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.maxArchiveBytes, err = positiveMebibytesValue(values, scannerArchiveSizeMBEnv, cfg.scanner.maxArchiveBytes); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.maxImagePixels, err = positiveInt64Value(values, scannerMaxImagePixelsEnv, cfg.scanner.maxImagePixels); err != nil {
+		return Config{}, err
+	}
+	if rawBlockedMIMEs := value(values, scannerBlockedMIMEsEnv, ""); rawBlockedMIMEs != "" {
+		cfg.scanner.blockedMIMETypes = commaSeparatedValues(rawBlockedMIMEs)
 	}
 
 	hardMaxFile, err := requiredMebibytesValue(values, hardMaxUploadMBEnv)
@@ -235,6 +303,12 @@ func validateConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.storage.bucket) == "" {
 		return fmt.Errorf("%s is required", s3BucketEnv)
 	}
+	if strings.TrimSpace(cfg.storage.quarantineBucket) == "" {
+		return fmt.Errorf("%s is required", s3QuarantineBucketEnv)
+	}
+	if cfg.storage.quarantineBucket == cfg.storage.bucket {
+		return fmt.Errorf("%s must differ from %s", s3QuarantineBucketEnv, s3BucketEnv)
+	}
 	if strings.TrimSpace(cfg.storage.region) == "" {
 		return fmt.Errorf("%s is required", s3RegionEnv)
 	}
@@ -349,6 +423,56 @@ func requiredMebibytesValue(values map[string]string, name string) (int64, error
 		return 0, fmt.Errorf("%s must contain an integer number of MiB: %w", name, err)
 	}
 	return mebibytesValue(parsed, name)
+}
+
+func positiveIntegerValue(values map[string]string, name string, fallback int) (int, error) {
+	rawValue := value(values, name, strconv.Itoa(fallback))
+	parsed, err := strconv.Atoi(rawValue)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer: %w", name, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+	return parsed, nil
+}
+
+func positiveInt64Value(values map[string]string, name string, fallback int64) (int64, error) {
+	rawValue := value(values, name, strconv.FormatInt(fallback, 10))
+	parsed, err := strconv.ParseInt(rawValue, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer: %w", name, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+	return parsed, nil
+}
+
+func positiveMebibytesValue(values map[string]string, name string, fallback int64) (int64, error) {
+	rawValue := value(values, name, strconv.FormatInt(fallback/mebibyte, 10))
+	parsed, err := strconv.ParseInt(rawValue, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer number of MiB: %w", name, err)
+	}
+	return mebibytesValue(parsed, name)
+}
+
+func commaSeparatedValues(rawValue string) []string {
+	values := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(rawValue, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		values = append(values, item)
+	}
+	return values
 }
 
 func sameSiteValue(values map[string]string, name, fallback string) (string, error) {

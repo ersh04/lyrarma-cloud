@@ -1,4 +1,4 @@
-package managers
+package handlers
 
 import "testing"
 

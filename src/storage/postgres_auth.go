@@ -84,7 +84,7 @@ var (
 	ErrEmailAlreadyUsed  = errors.New("email already used")
 )
 
-// UserStore stores identifiers and data required to authenticate users.
+// UserStore stores identifiers and data required to authenticate users
 type UserStore struct {
 	db              *pgxpool.Pool
 	defaultPlan     string
@@ -92,7 +92,7 @@ type UserStore struct {
 	planNames       map[string]struct{}
 }
 
-// NewUserStore connects to lyrarma-services-users and prepares its schema.
+// NewUserStore connects to lyrarma-services-users and prepares its schema
 func NewUserStore(databaseURL, defaultPlan string, configuredPlans []string) (*UserStore, error) {
 	db, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
@@ -138,14 +138,14 @@ func (s *UserStore) init() error {
 	return nil
 }
 
-// Close closes the user database connection.
+// Close closes the user database connection
 func (s *UserStore) Close() {
 	if s != nil && s.db != nil {
 		s.db.Close()
 	}
 }
 
-// CreateUser stores a new user account.
+// CreateUser stores a new user account
 func (s *UserStore) CreateUser(user models.User) error {
 	if err := s.validateAssignedPlans(user.Plan); err != nil {
 		return err
@@ -173,7 +173,7 @@ func (s *UserStore) CreateUser(user models.User) error {
 	return fmt.Errorf("create authentication user: %w", err)
 }
 
-// GetUserByUsername returns authentication data for a username.
+// GetUserByUsername returns authentication data for a username
 func (s *UserStore) GetUserByUsername(username string) (models.User, error) {
 	var user models.User
 	err := s.db.QueryRow(context.Background(), selectAuthUserSQL, username).
@@ -187,7 +187,7 @@ func (s *UserStore) GetUserByUsername(username string) (models.User, error) {
 	return user, nil
 }
 
-// GetUserPlans returns the service plans assigned to an authentication user.
+// GetUserPlans returns the service plans assigned to an authentication user
 func (s *UserStore) GetUserPlans(ctx context.Context, id string) ([]string, error) {
 	var plans []string
 	err := s.db.QueryRow(ctx, selectAuthUserPlansSQL, id).Scan(&plans)
@@ -200,7 +200,7 @@ func (s *UserStore) GetUserPlans(ctx context.Context, id string) ([]string, erro
 	return append([]string(nil), plans...), nil
 }
 
-// DeleteUser removes an account only when its ID, username, and email match.
+// DeleteUser removes an account only when its ID, username, and email match
 func (s *UserStore) DeleteUser(user models.User) error {
 	if _, err := s.db.Exec(context.Background(), deleteAuthUserSQL, user.ID, user.Username, user.Email); err != nil {
 		return fmt.Errorf("delete authentication user: %w", err)

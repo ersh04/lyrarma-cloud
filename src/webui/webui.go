@@ -1,4 +1,4 @@
-// Package webui implements the server-rendered cloud storage web interface.
+// Package webui implements the server-rendered cloud storage web interface
 package webui
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// Config contains the web interface settings.
+// Config contains the web interface settings
 type Config struct {
 	TemplatesDir     string
 	TranslationsFile string
@@ -28,7 +28,7 @@ type Config struct {
 	MaxUploadSize    int64
 }
 
-// Handler serves HTML pages and delegates actions to the internal API.
+// Handler serves HTML pages and delegates actions to the internal API
 type Handler struct {
 	config       Config
 	logger       *slog.Logger
@@ -37,7 +37,7 @@ type Handler struct {
 	api          *fiber.App
 }
 
-// New loads the templates and registers the web interface routes.
+// New loads the templates and registers the web interface routes
 func New(api *fiber.App, config Config, logger *slog.Logger) (*Handler, error) {
 	if api == nil {
 		return nil, fmt.Errorf("cloud API handler is not configured")

@@ -54,7 +54,7 @@ type userPlan struct {
 	plan string
 }
 
-// ReconcileUserProfiles makes ID the only value shared by the authentication and cloud user tables.
+// ReconcileUserProfiles makes ID the only value shared by the authentication and cloud user tables
 func ReconcileUserProfiles(ctx context.Context, cloudStore *SQLStore, userStore *UserStore) error {
 	legacyLinks, hasLegacyIdentity, err := cloudStore.legacyUserLinks(ctx)
 	if err != nil {

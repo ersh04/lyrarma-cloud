@@ -12,15 +12,18 @@ import (
 	"github.com/lyrarma/cloud-api/src/models"
 )
 
+// dashboard renders the user page with files and folders
 func (h *Handler) dashboard(c fiber.Ctx) error {
 	token := h.token(c)
 	maxUploadSize := h.config.MaxUploadSize
 
+	// Determine the current folder from the query parameter
 	currentFolderID := strings.TrimSpace(c.Query("folder_id"))
 	if currentFolderID == "" {
 		currentFolderID = "root"
 	}
 
+	// Retrieve the file list from the API
 	filesResponse, err := h.callAPI(c, fiber.MethodGet,
 		"/api/files?folder_id="+url.QueryEscape(currentFolderID), nil, "", token)
 	if err != nil {
@@ -31,6 +34,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		return h.expireSession(c)
 	}
 
+	// Retrieve the folder list from the API
 	foldersResponse, err := h.callAPI(c, fiber.MethodGet, "/api/folders", nil, "", token)
 	if err != nil {
 		h.logger.Error("failed to retrieve folders", "err", err)
@@ -40,6 +44,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		return h.expireSession(c)
 	}
 
+	// Retrieve the user upload limits from the API
 	limitsResponse, limitsErr := h.callAPI(c, fiber.MethodGet, "/api/info/limits", nil, "", token)
 	if limitsErr != nil {
 		h.logger.Error("failed to retrieve user limits", "err", limitsErr)
@@ -58,6 +63,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		h.logger.Error("failed to retrieve user limits", "status", limitsResponse.status)
 	}
 
+	// Parse API responses and prepare template data
 	var fileList models.FileListResponse
 	var folderList models.FolderListResponse
 	if filesResponse.status != fiber.StatusOK || json.Unmarshal(filesResponse.body, &fileList) != nil {
@@ -139,7 +145,8 @@ func (h *Handler) upload(c fiber.Ctx) error {
 		if isXHR {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "connect"})
 		}
-		return c.Redirect().Status(fiber.StatusFound).To("/dashboard?folder_id=" + url.QueryEscape(folderID) + "&error=connect")
+		return c.Redirect().Status(fiber.StatusFound).
+			To("/dashboard?folder_id=" + url.QueryEscape(folderID) + "&error=connect")
 	}
 
 	sendAPIResponse := func() error {
@@ -299,6 +306,7 @@ func fileContext(file models.FileEntry) map[string]any {
 		"name":          file.OriginalName,
 		"size":          file.Size,
 		"content_type":  file.ContentType,
+		"status":        file.Status,
 		"uploaded_at":   file.UploadedAt.Format("2006-01-02"),
 	}
 }

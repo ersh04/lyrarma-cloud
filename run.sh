@@ -28,7 +28,7 @@ if ! docker compose -f compose.users_db.yaml up -d --wait --wait-timeout 60; the
 	exit 1
 fi
 
-# Restart the cloud process if the configured port is already in use.
+# Restart the cloud process if the configured port is already in use
 printf 'Starting Lyrarma Cloud.\n'
 
 PID="$(lsof -t -iTCP:8080 -sTCP:LISTEN || true)"

@@ -12,7 +12,7 @@ import (
 	"github.com/lyrarma/cloud-api/src/webui"
 )
 
-// newRouter creates the root Fiber application and mounts the cloud storage routes.
+// newRouter creates the root Fiber application and mounts the cloud storage routes
 func newRouter(cfg cloudconfig.Config, application *fiber.App) *fiber.App {
 	serverConfig := cfg.Server()
 	webConfig := cfg.Web()
@@ -40,7 +40,7 @@ func newRouter(cfg cloudconfig.Config, application *fiber.App) *fiber.App {
 	return app
 }
 
-// newCloudApplication initializes the cloud storage API and web interface.
+// newCloudApplication initializes the cloud storage API and web interface
 func newCloudApplication(cfg cloudconfig.Config, logger *slog.Logger) (*cloudapi.API, *fiber.App, error) {
 	cloudAPI, err := cloudapi.New(cfg, logger)
 	if err != nil {

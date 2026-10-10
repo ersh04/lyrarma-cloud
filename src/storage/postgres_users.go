@@ -9,7 +9,7 @@ import (
 	"github.com/lyrarma/cloud-api/src/models"
 )
 
-// EnsureUserProfile creates a cloud user profile or returns the existing one.
+// EnsureUserProfile creates a cloud user profile or returns the existing one
 func (s *SQLStore) EnsureUserProfile(profile models.UserProfile) (models.UserProfile, error) {
 	_, err := s.db.Exec(
 		context.Background(),
