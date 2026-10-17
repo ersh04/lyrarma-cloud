@@ -317,6 +317,56 @@ a:hover {
   font-size: .85rem;
 }
 
+.storage-meter {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+
+.storage-meter [hidden] {
+  display: none;
+}
+
+.storage-meter__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+}
+
+.storage-meter__amounts {
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-meter__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.storage-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width .2s ease;
+}
+
+.storage-meter[data-state="warning"] .storage-meter__fill {
+  background: var(--color-warning);
+}
+
+.storage-meter[data-state="full"] .storage-meter__fill {
+  background: var(--color-danger);
+}
+
+.storage-meter__detail {
+  color: var(--color-text-muted);
+  font-size: .82rem;
+  overflow-wrap: anywhere;
+}
+
 .file-manager {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -587,6 +637,40 @@ a:hover {
   gap: .45rem;
   min-width: 0;
   height: 100%;
+}
+
+.file-table__row--unavailable,
+.file-table__row--unavailable .permission-switch,
+.file-table__row--unavailable .file-table__action-btn:not(.file-table__delete-btn) {
+  cursor: not-allowed;
+}
+
+.file-table__row--unavailable .permission-switch,
+.file-table__row--unavailable .file-table__action-btn:not(.file-table__delete-btn) {
+  opacity: .5;
+}
+
+.file-table__row--unavailable .file-table__share-btn:disabled,
+.file-table__download-btn[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+.file-status-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: calc(100vw - 16px);
+  padding: .5rem .75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-card);
+  font-size: .85rem;
+  pointer-events: none;
+}
+
+.file-status-tooltip[hidden] {
+  display: none;
 }
 
 .file-table__name-text {

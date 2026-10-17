@@ -59,7 +59,7 @@ func (h *Handler) register(c fiber.Ctx) error {
 	if password != c.FormValue("password_confirm") {
 		return h.render(c, "register.html", pongo2.Context{"error": h.message(c, "error_passwords_mismatch")}, fiber.StatusBadRequest)
 	}
-	if !equalSecret(c.FormValue("beta_key"), h.config.BetaTestKey) {
+	if h.config.BetaTestKey != "" && !equalSecret(c.FormValue("beta_key"), h.config.BetaTestKey) {
 		return h.render(c, "register.html", pongo2.Context{"error": h.message(c, "error_invalid_beta_key")}, fiber.StatusForbidden)
 	}
 

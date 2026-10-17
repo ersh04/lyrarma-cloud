@@ -61,6 +61,7 @@ type JWTConfig struct {
 
 // ScannerConfig contains background file scanning settings
 type ScannerConfig struct {
+	enabled           bool
 	workerCount       int
 	pollInterval      time.Duration
 	timeout           time.Duration
@@ -111,6 +112,7 @@ func (c StorageConfig) UsePathStyle() bool         { return c.usePathStyle }
 func (c JWTConfig) Secret() string                 { return c.secret }
 func (c JWTConfig) TokenTTL() time.Duration        { return c.tokenTTL }
 
+func (c ScannerConfig) Enabled() bool               { return c.enabled }
 func (c ScannerConfig) WorkerCount() int            { return c.workerCount }
 func (c ScannerConfig) PollInterval() time.Duration { return c.pollInterval }
 func (c ScannerConfig) Timeout() time.Duration      { return c.timeout }

@@ -361,6 +361,16 @@ func (h *FileHandler) ChangeFilePermission(c fiber.Ctx) {
 		return
 	}
 
+	entry, err := h.metadataStore.GetFile(c.Context(), userID, fileID)
+	if err != nil {
+		h.handleFileLookupError(c, "failed to retrieve file", fileID, err)
+		return
+	}
+	if entry.Status != models.FileApproved {
+		httpresponse.WriteError(c, fiber.StatusConflict, "file_unavailable", "file is not approved")
+		return
+	}
+
 	if err := h.metadataStore.UpdateFilePermission(c.Context(), userID, fileID, isPublic); err != nil {
 		h.handleFileLookupError(c, "file permission update failed", fileID, err)
 		return

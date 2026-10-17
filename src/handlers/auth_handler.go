@@ -59,7 +59,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 		return
 	}
 
-	if !equalRegistrationKey(request.BetaKey, h.registrationKey) {
+	if h.registrationKey != "" && !equalRegistrationKey(request.BetaKey, h.registrationKey) {
 		httpresponse.WriteError(c, fiber.StatusForbidden, "invalid_beta_key", "invalid registration key")
 		return
 	}

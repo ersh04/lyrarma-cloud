@@ -41,6 +41,7 @@ const (
 	s3AccessKeyIDEnv         = "AWS_ACCESS_KEY_ID"
 	s3SecretAccessKeyEnv     = "AWS_SECRET_ACCESS_KEY"
 	s3UsePathStyleEnv        = "S3_USE_PATH_STYLE"
+	scannerEnabledEnv        = "SCANNER_ENABLED"
 	scannerWorkersEnv        = "SCANNER_WORKERS"
 	scannerPollIntervalEnv   = "SCANNER_POLL_INTERVAL"
 	scannerTimeoutEnv        = "SCANNER_TIMEOUT"
@@ -111,6 +112,7 @@ func Load() (Config, error) {
 			tokenTTL: 24 * time.Hour,
 		},
 		scanner: ScannerConfig{
+			enabled:           true,
 			workerCount:       2,
 			pollInterval:      2 * time.Second,
 			timeout:           10 * time.Minute,
@@ -161,6 +163,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.jwt.tokenTTL, err = positiveDurationValue(values, cloudJWTTokenTTLEnv, cfg.jwt.tokenTTL); err != nil {
+		return Config{}, err
+	}
+	if cfg.scanner.enabled, err = boolValue(values, scannerEnabledEnv, cfg.scanner.enabled); err != nil {
 		return Config{}, err
 	}
 	if cfg.scanner.workerCount, err = positiveIntegerValue(values, scannerWorkersEnv, cfg.scanner.workerCount); err != nil {
@@ -294,7 +299,7 @@ func validateConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.usersDBURL) == "" {
 		return fmt.Errorf("%s is required", usersDatabaseURLEnv)
 	}
-	if len(cfg.betaTestKey) < 16 || cfg.betaTestKey == exampleBetaTestKey {
+	if cfg.betaTestKey != "" && (len(cfg.betaTestKey) < 16 || cfg.betaTestKey == exampleBetaTestKey) {
 		return fmt.Errorf("%s must contain at least 16 bytes and differ from the example value", betaTestKeyEnv)
 	}
 	if len(cfg.jwt.secret) < 32 || cfg.jwt.secret == exampleJWTSecret {

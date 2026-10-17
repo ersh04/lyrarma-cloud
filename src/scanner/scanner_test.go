@@ -1,9 +1,29 @@
 package scanner
 
 import (
+	"context"
 	"math"
+	"path/filepath"
 	"testing"
+
+	"github.com/lyrarma/cloud-api/src/config"
+	"github.com/lyrarma/cloud-api/src/models"
 )
+
+func TestDisabledScannerSkipsInspection(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+	service := New(nil, nil, config.ScannerConfig{}, nil)
+	result := service.inspect(context.Background(), models.FileEntry{
+		OriginalName: "program.exe",
+		ContentType:  "application/x-dosexec",
+	})
+	if result.status != models.FileApproved || result.reason != "" {
+		t.Fatalf("expected approval without inspection, got %+v", result)
+	}
+	if result.detectedContentType != "" || result.sha256 != "" {
+		t.Fatalf("uninspected file must not have detected metadata, got %+v", result)
+	}
+}
 
 func TestArchiveMetricsCountsOnlyFiles(t *testing.T) {
 	listing := []byte("7-Zip 24.00\r\n\r\n----------\r\nPath = folder\r\nSize = 0\r\nFolder = +\r\n\r\nPath = folder/a.txt\r\nSize = 12\r\nFolder = -\r\n\r\nPath = b.bin\r\nSize = 30\r\nFolder = -\r\n")

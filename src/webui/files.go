@@ -16,6 +16,7 @@ import (
 func (h *Handler) dashboard(c fiber.Ctx) error {
 	token := h.token(c)
 	maxUploadSize := h.config.MaxUploadSize
+	var storageLimits *dashboardLimits
 
 	// Determine the current folder from the query parameter
 	currentFolderID := strings.TrimSpace(c.Query("folder_id"))
@@ -28,7 +29,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		"/api/files?folder_id="+url.QueryEscape(currentFolderID), nil, "", token)
 	if err != nil {
 		h.logger.Error("failed to retrieve files", "err", err)
-		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.message(c, "error_files_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, storageLimits, h.message(c, "error_files_list"))
 	}
 	if filesResponse.status == fiber.StatusUnauthorized {
 		return h.expireSession(c)
@@ -38,7 +39,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 	foldersResponse, err := h.callAPI(c, fiber.MethodGet, "/api/folders", nil, "", token)
 	if err != nil {
 		h.logger.Error("failed to retrieve folders", "err", err)
-		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.message(c, "error_folders_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, storageLimits, h.message(c, "error_folders_list"))
 	}
 	if foldersResponse.status == fiber.StatusUnauthorized {
 		return h.expireSession(c)
@@ -51,11 +52,10 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 	} else if limitsResponse.status == fiber.StatusUnauthorized {
 		return h.expireSession(c)
 	} else if limitsResponse.status == fiber.StatusOK {
-		var limits struct {
-			MaxUploadSize int64 `json:"max_upload_size"`
-		}
+		var limits dashboardLimits
 		if json.Unmarshal(limitsResponse.body, &limits) == nil && limits.MaxUploadSize > 0 {
 			maxUploadSize = limits.MaxUploadSize
+			storageLimits = &limits
 		} else {
 			h.logger.Error("failed to decode user limits")
 		}
@@ -67,13 +67,13 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 	var fileList models.FileListResponse
 	var folderList models.FolderListResponse
 	if filesResponse.status != fiber.StatusOK || json.Unmarshal(filesResponse.body, &fileList) != nil {
-		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, h.apiMessage(c, filesResponse, "error_files_list"))
+		return h.renderDashboard(c, nil, nil, currentFolderID, maxUploadSize, storageLimits, h.apiMessage(c, filesResponse, "error_files_list"))
 	}
 	if foldersResponse.status != fiber.StatusOK || json.Unmarshal(foldersResponse.body, &folderList) != nil {
-		return h.renderDashboard(c, fileList.Files, nil, currentFolderID, maxUploadSize, h.apiMessage(c, foldersResponse, "error_folders_list"))
+		return h.renderDashboard(c, fileList.Files, nil, currentFolderID, maxUploadSize, storageLimits, h.apiMessage(c, foldersResponse, "error_folders_list"))
 	}
 
-	return h.renderDashboard(c, fileList.Files, folderList.Folders, currentFolderID, maxUploadSize, h.dashboardError(c))
+	return h.renderDashboard(c, fileList.Files, folderList.Folders, currentFolderID, maxUploadSize, storageLimits, h.dashboardError(c))
 }
 
 func (h *Handler) renderDashboard(
@@ -82,6 +82,7 @@ func (h *Handler) renderDashboard(
 	folders []models.FolderEntry,
 	currentFolderID string,
 	maxUploadSize int64,
+	storageLimits *dashboardLimits,
 	errorMessage string,
 ) error {
 	folderByID := make(map[string]models.FolderEntry, len(folders))
@@ -130,6 +131,7 @@ func (h *Handler) renderDashboard(
 		"files_word":          h.countWord(h.requestLanguage(c), len(files), "file"),
 		"folders_word":        h.countWord(h.requestLanguage(c), len(folders), "folder"),
 		"max_upload_mb":       maxUploadSize / (1024 * 1024),
+		"storage":             storageContext(storageLimits, h.requestLanguage(c)),
 	}, fiber.StatusOK)
 }
 
@@ -187,6 +189,13 @@ func (h *Handler) upload(c fiber.Ctx) error {
 		})
 	}
 	return c.Redirect().Status(fiber.StatusFound).To(location)
+}
+
+func (h *Handler) fileStatuses(c fiber.Ctx) error {
+	folderID := models.NormalizeFolderID(c.Query("folder_id"))
+	err := h.proxyAPI(c, fiber.MethodGet, "/api/files?folder_id="+url.QueryEscape(folderID), h.token(c))
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return err
 }
 
 func (h *Handler) download(c fiber.Ctx) error {
@@ -307,6 +316,8 @@ func fileContext(file models.FileEntry) map[string]any {
 		"size":          file.Size,
 		"content_type":  file.ContentType,
 		"status":        file.Status,
+		"scan_pending":  file.Status == models.FileUploading || file.Status == models.FileScanning,
+		"is_approved":   file.Status == models.FileApproved,
 		"uploaded_at":   file.UploadedAt.Format("2006-01-02"),
 	}
 }

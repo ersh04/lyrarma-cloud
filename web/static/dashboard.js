@@ -1,5 +1,8 @@
 (function () {
   const dashboardRoot = document.querySelector(".dashboard");
+  let fileTooltipRow = null;
+  let storageUsageUpdating = false;
+  let storageSessionExpired = false;
 
   function getElement(id) {
     return document.getElementById(id);
@@ -41,6 +44,81 @@
     }
 
     return `${bytes.toFixed(1)} ${units[index]}`;
+  }
+
+  function formatStorageGB(bytes) {
+    let gigabytes = bytes / (1024 ** 3);
+    let prefix = "";
+    if (gigabytes > 0 && gigabytes < 0.01) {
+      prefix = "<";
+      gigabytes = 0.01;
+    }
+    return prefix + new Intl.NumberFormat(document.documentElement.lang || "en", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+      useGrouping: false,
+    }).format(gigabytes);
+  }
+
+  function updateStorageUsage(limits) {
+    const meter = getElement("storageUsage");
+    if (!meter || ![limits.max_storage_size, limits.used_storage_size, limits.reserved_storage_size].every(Number.isFinite) ||
+        limits.max_storage_size <= 0 || limits.used_storage_size < 0 || limits.reserved_storage_size < 0) {
+      return;
+    }
+    const used = limits.used_storage_size + limits.reserved_storage_size;
+    const percent = Math.min(100, used / limits.max_storage_size * 100);
+    const usedGB = formatStorageGB(used);
+    const limitGB = formatStorageGB(limits.max_storage_size);
+    getElement("storageUsed").textContent = usedGB;
+    getElement("storageLimit").textContent = limitGB;
+    getElement("storageReservedSize").textContent = formatStorageGB(limits.reserved_storage_size);
+    getElement("storagePlanName").textContent = Array.isArray(limits.plan) ? limits.plan.join(", ") : "";
+    getElement("storageAmounts").hidden = false;
+    getElement("storagePlan").hidden = false;
+    getElement("storageReserved").hidden = limits.reserved_storage_size === 0;
+    getElement("storageUnavailable").hidden = true;
+    getElement("storageFill").style.width = `${percent}%`;
+    meter.dataset.state = percent >= 100 ? "full" : percent >= 80 ? "warning" : "normal";
+    const progress = getElement("storageProgress");
+    progress.hidden = false;
+    progress.setAttribute("aria-valuenow", String(percent));
+    progress.setAttribute("aria-valuetext", `${usedGB} ${translate("sizeGbUnit")} ${translate("storageOf")} ${limitGB} ${translate("sizeGbUnit")}`);
+  }
+
+  async function refreshStorageUsage() {
+    if (storageUsageUpdating || storageSessionExpired || !getElement("storageUsage")) {
+      return;
+    }
+    storageUsageUpdating = true;
+    try {
+      const response = await fetch("/storage/usage", { cache: "no-store" });
+      if (response.redirected || response.status === 401) {
+        storageSessionExpired = true;
+      } else if (response.ok) {
+        updateStorageUsage(await response.json());
+      }
+    } catch {
+    } finally {
+      storageUsageUpdating = false;
+    }
+  }
+
+  function watchStorageUsage() {
+    const poll = async () => {
+      if (!document.hidden) {
+        await refreshStorageUsage();
+      }
+      if (!storageSessionExpired) {
+        window.setTimeout(poll, 10000);
+      }
+    };
+    window.setTimeout(poll, 10000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        refreshStorageUsage();
+      }
+    });
   }
 
   function describeSelectedFiles(files) {
@@ -162,6 +240,7 @@
             }
 
             item.remove();
+            refreshStorageUsage();
           } catch (error) {
             if (submitButton) {
               submitButton.disabled = false;
@@ -190,6 +269,9 @@
   function bindPermissionSwitches() {
     document.querySelectorAll(".permission-switch__input").forEach((input) => {
       input.addEventListener("change", () => {
+        if (input.disabled) {
+          return;
+        }
         const fileId = input.dataset.fileId;
         const folderId = input.dataset.folderId || "root";
         const folderPermissionId = input.dataset.folderId;
@@ -251,6 +333,9 @@
   function bindShareButtons() {
     document.querySelectorAll(".file-table__share-btn").forEach((button) => {
       button.addEventListener("click", async () => {
+        if (button.disabled) {
+          return;
+        }
         const isPublic = button.dataset.isPublic === "true";
         if (!isPublic) {
           alert(translate("shareMakePublicFirst"));
@@ -303,8 +388,12 @@
           }
 
           if (row) {
+            if (fileTooltipRow === row) {
+              hideFileTooltip();
+            }
             row.remove();
           }
+          refreshStorageUsage();
 
           const tableBody = document.querySelector(".file-table tbody");
           const hasRows = Boolean(tableBody && tableBody.querySelector("tr"));
@@ -524,6 +613,7 @@
         window.location.href = redirectUrl.toString();
       } catch (error) {
         const errorMessage = String(error && error.message || "");
+        refreshStorageUsage();
         if (errorMessage === "unauthorized") {
           window.location.href = "/login?expired=1";
           return;
@@ -551,6 +641,164 @@
     });
   }
 
+  function hideFileTooltip() {
+    const tooltip = getElement("fileStatusTooltip");
+    if (tooltip) {
+      tooltip.hidden = true;
+    }
+    fileTooltipRow = null;
+  }
+
+  function showFileTooltip(row, x, y) {
+    const tooltip = getElement("fileStatusTooltip");
+    if (!tooltip) {
+      return;
+    }
+    const pending = row.dataset.fileStatus === "uploading" || row.dataset.fileStatus === "scanning";
+    fileTooltipRow = row;
+    tooltip.textContent = translate(pending ? "fileScanPending" : "fileUnavailable");
+    tooltip.hidden = false;
+    const bounds = tooltip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(x + 12, window.innerWidth - bounds.width - 8));
+    const top = y + 16 + bounds.height > window.innerHeight - 8 ? y - bounds.height - 12 : y + 16;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function bindFileTooltips() {
+    const tooltipRow = (target) => {
+      if (!(target instanceof Element) || target.closest('form[action^="/delete/"]')) {
+        return null;
+      }
+      return target.closest(".file-table__row--unavailable");
+    };
+    const pointerTooltip = (event) => {
+      const row = tooltipRow(event.target);
+      if (row) {
+        showFileTooltip(row, event.clientX, event.clientY);
+      } else {
+        hideFileTooltip();
+      }
+    };
+    document.addEventListener("pointerover", pointerTooltip, true);
+    document.addEventListener("pointermove", pointerTooltip, true);
+    document.addEventListener("pointerout", (event) => {
+      if (!event.relatedTarget) {
+        hideFileTooltip();
+      }
+    }, true);
+    document.addEventListener("focusin", (event) => {
+      const row = tooltipRow(event.target);
+      if (row) {
+        const bounds = row.getBoundingClientRect();
+        showFileTooltip(row, bounds.left, bounds.bottom);
+      } else {
+        hideFileTooltip();
+      }
+    });
+    document.addEventListener("focusout", hideFileTooltip);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hideFileTooltip();
+      }
+    });
+    window.addEventListener("scroll", hideFileTooltip, true);
+    window.addEventListener("blur", hideFileTooltip);
+  }
+
+  function setFileStatus(row, status) {
+    const approved = status === "approved";
+    const pending = status === "uploading" || status === "scanning";
+    const unavailableTitle = translate(pending ? "fileScanPending" : "fileUnavailable");
+    row.dataset.fileStatus = status;
+    row.classList.toggle("file-table__row--unavailable", !approved);
+    row.setAttribute("aria-busy", String(pending));
+    if (approved) {
+      row.removeAttribute("aria-describedby");
+      row.removeAttribute("tabindex");
+    } else {
+      row.setAttribute("aria-describedby", "fileStatusTooltip");
+      row.setAttribute("tabindex", "0");
+    }
+
+    const nameCell = row.querySelector(".file-table__name");
+    const typeLabel = row.querySelector(".file-table__type code");
+    const permissionSwitch = row.querySelector(".permission-switch");
+    row.querySelector(".permission-switch__input").disabled = !approved;
+    const shareButton = row.querySelector(".file-table__share-btn");
+    shareButton.disabled = !approved;
+
+    const downloadButton = row.querySelector(".file-table__download-btn");
+    if (approved) {
+      nameCell.title = row.querySelector(".file-table__name-text").textContent;
+      typeLabel.title = typeLabel.textContent;
+      permissionSwitch.title = translate("access");
+      shareButton.title = translate("share");
+      downloadButton.title = translate("download");
+      downloadButton.href = downloadButton.dataset.downloadUrl;
+      downloadButton.removeAttribute("aria-disabled");
+      downloadButton.removeAttribute("role");
+      downloadButton.removeAttribute("tabindex");
+    } else {
+      [nameCell, typeLabel, permissionSwitch, shareButton, downloadButton].forEach((element) => element.removeAttribute("title"));
+      downloadButton.removeAttribute("href");
+      downloadButton.setAttribute("aria-disabled", "true");
+      downloadButton.setAttribute("role", "link");
+      downloadButton.setAttribute("tabindex", "-1");
+    }
+    if (fileTooltipRow === row) {
+      if (approved || !row.isConnected) {
+        hideFileTooltip();
+      } else {
+        getElement("fileStatusTooltip").textContent = unavailableTitle;
+      }
+    }
+  }
+
+  function watchFileScans() {
+    const pendingRows = () => Array.from(document.querySelectorAll(
+      '.file-table__row[data-file-status="uploading"], .file-table__row[data-file-status="scanning"]',
+    ));
+
+    const poll = async () => {
+      const rows = pendingRows();
+      if (!rows.length) {
+        return;
+      }
+      let sessionExpired = false;
+      try {
+        if (!document.hidden) {
+          const url = new URL("/files/status", window.location.origin);
+          url.searchParams.set("folder_id", dashboardRoot.dataset.currentFolderId || "root");
+          const response = await fetch(url, { cache: "no-store" });
+          if (response.redirected || response.status === 401) {
+            sessionExpired = true;
+            return;
+          }
+          if (response.ok) {
+            const result = await response.json();
+            const files = new Map((result.files || []).map((file) => [file.id, file]));
+            rows.forEach((row) => {
+              const file = files.get(row.dataset.fileId);
+              if (file && row.isConnected) {
+                setFileStatus(row, file.status);
+              }
+            });
+          }
+        }
+      } catch {
+      } finally {
+        if (!sessionExpired && pendingRows().length) {
+          window.setTimeout(poll, 2000);
+        }
+      }
+    };
+
+    if (pendingRows().length) {
+      window.setTimeout(poll, 2000);
+    }
+  }
+
   function initialize() {
     if (!dashboardRoot) {
       return;
@@ -560,7 +808,10 @@
     bindPermissionSwitches();
     bindShareButtons();
     bindFileDeleteForms();
+    bindFileTooltips();
     bindUploadForm();
+    watchFileScans();
+    watchStorageUsage();
     setSelectedFolder(dashboardRoot.dataset.currentFolderId || "root");
   }
 

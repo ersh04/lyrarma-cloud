@@ -42,9 +42,6 @@ func New(api *fiber.App, config Config, logger *slog.Logger) (*Handler, error) {
 	if api == nil {
 		return nil, fmt.Errorf("cloud API handler is not configured")
 	}
-	if strings.TrimSpace(config.BetaTestKey) == "" {
-		return nil, fmt.Errorf("beta key is not configured")
-	}
 	if strings.TrimSpace(config.AuthCookieName) == "" {
 		return nil, fmt.Errorf("authentication cookie name is not configured")
 	}
@@ -97,6 +94,8 @@ func (h *Handler) registerRoutes() {
 	h.api.Post("/register", h.register)
 	h.api.Get("/logout", h.requireSession, h.logout)
 	h.api.Get("/dashboard", h.requireSession, h.dashboard)
+	h.api.Get("/files/status", h.requireSession, h.fileStatuses)
+	h.api.Get("/storage/usage", h.requireSession, h.storageUsage)
 	h.api.Post("/upload", h.requireSession, h.upload)
 	h.api.Get("/download/:fileID", h.requireSession, h.download)
 	h.api.Get("/public/download/:fileID", h.publicDownload)
@@ -130,11 +129,12 @@ func (h *Handler) render(c fiber.Ctx, templateName string, values pongo2.Context
 func (h *Handler) baseContext(c fiber.Ctx) pongo2.Context {
 	lang := h.requestLanguage(c)
 	return pongo2.Context{
-		"lang":          lang,
-		"authenticated": h.token(c) != "",
-		"username":      h.username(c),
-		"current_url":   c.OriginalURL(),
-		"language_next": url.QueryEscape(c.OriginalURL()),
+		"lang":              lang,
+		"authenticated":     h.token(c) != "",
+		"beta_key_required": h.config.BetaTestKey != "",
+		"username":          h.username(c),
+		"current_url":       c.OriginalURL(),
+		"language_next":     url.QueryEscape(c.OriginalURL()),
 		"t": func(key string) string {
 			return h.translate(lang, key)
 		},

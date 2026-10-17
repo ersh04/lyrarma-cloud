@@ -94,6 +94,9 @@ func (s *Service) Start(parent context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	s.cancel = cancel
+	if !s.settings.Enabled() {
+		s.logger.Info("file scanning disabled; workers only promote uploaded files")
+	}
 	for workerID := 0; workerID < s.settings.WorkerCount(); workerID++ {
 		s.workers.Add(1)
 		go s.worker(ctx, workerID)
@@ -144,7 +147,11 @@ func (s *Service) process(parent context.Context, entry models.FileEntry, scanSt
 	objectKey := fileObjectKey(entry.OwnerID, entry.ID)
 	promoted := false
 	if result.status == models.FileApproved {
-		if err := s.fileStore.PromoteQuarantineFile(scanContext, objectKey, objectKey, result.detectedContentType); err != nil {
+		contentType := result.detectedContentType
+		if contentType == "" {
+			contentType = entry.ContentType
+		}
+		if err := s.fileStore.PromoteQuarantineFile(scanContext, objectKey, objectKey, contentType); err != nil {
 			s.logger.Error("failed to promote approved file", "file_id", entry.ID, "err", err)
 			result.status = models.FileFailed
 			result.reason = reasonScannerError
@@ -180,6 +187,9 @@ func (s *Service) process(parent context.Context, entry models.FileEntry, scanSt
 }
 
 func (s *Service) inspect(ctx context.Context, entry models.FileEntry) scanResult {
+	if !s.settings.Enabled() {
+		return scanResult{status: models.FileApproved}
+	}
 	result := scanResult{status: models.FileFailed, reason: reasonScannerError}
 	temporaryFile, err := os.CreateTemp("", "lyrarma-scan-*")
 	if err != nil {

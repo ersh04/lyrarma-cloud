@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,12 +33,81 @@ func TestLoadBuildsValidatedImmutableLimits(t *testing.T) {
 	}
 }
 
+func TestLoadScannerEnabled(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		envValue  string
+		fileValue string
+		want      bool
+		wantError bool
+	}{
+		{name: "enabled by default", want: true},
+		{name: "explicitly enabled", envValue: "true", want: true},
+		{name: "disabled by environment", envValue: "false"},
+		{name: "disabled by file", fileValue: "false"},
+		{name: "environment overrides file", envValue: "true", fileValue: "false", want: true},
+		{name: "invalid value", envValue: "invalid", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(scannerEnabledEnv, test.envValue)
+			if test.fileValue != "" {
+				if err := os.WriteFile(os.Getenv(configFileEnv), []byte("SCANNER_ENABLED="+test.fileValue+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), scannerEnabledEnv) {
+					t.Fatalf("expected SCANNER_ENABLED validation error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Scanner().Enabled(); got != test.want {
+				t.Errorf("scanner enabled = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsExampleSecret(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(cloudJWTSecretEnv, exampleJWTSecret)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected the example secret to be rejected")
+	}
+}
+
+func TestLoadOptionalBetaKey(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		key   string
+		valid bool
+	}{
+		{name: "empty disables beta key", valid: true},
+		{name: "non-empty key", key: "0123456789abcdef", valid: true},
+		{name: "short key", key: "short"},
+		{name: "example key", key: exampleBetaTestKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(betaTestKeyEnv, test.key)
+			cfg, err := Load()
+			if test.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.BetaTestKey() != test.key {
+					t.Errorf("unexpected beta key: %q", cfg.BetaTestKey())
+				}
+			} else if err == nil || !strings.Contains(err.Error(), betaTestKeyEnv) {
+				t.Fatalf("expected BETA_TEST_KEY validation error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -111,6 +181,7 @@ func setValidEnvironment(t *testing.T) {
 
 	values := map[string]string{
 		configFileEnv:         configPath,
+		scannerEnabledEnv:     "",
 		databaseURLEnv:        "postgres://localhost/test",
 		usersDatabaseURLEnv:   "postgres://localhost/lyrarma-services-users",
 		betaTestKeyEnv:        "0123456789abcdef",

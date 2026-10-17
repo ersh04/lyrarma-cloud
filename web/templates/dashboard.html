@@ -27,6 +27,13 @@
   data-upload-rejected="{{ t('upload_rejected') }}"
   data-network-error="{{ t('network_error') }}"
   data-upload-error="{{ t('upload_error') }}"
+  data-file-scan-pending="{{ t('file_scan_pending') }}"
+  data-file-unavailable="{{ t('file_unavailable') }}"
+  data-share="{{ t('share') }}"
+  data-download="{{ t('download') }}"
+  data-access="{{ t('access') }}"
+  data-size-gb-unit="{{ t('size_gb_unit') }}"
+  data-storage-of="{{ t('storage_of') }}"
 >
 
   {# ── Top bar ─────────────────────────────────────────────────────── #}
@@ -38,6 +45,21 @@
       {{ files | length }} {{ files_word }}
     </span>
   </div>
+
+  <section class="card storage-meter" id="storageUsage" data-state="{{ storage.state }}">
+    <div class="storage-meter__header">
+      <h2 class="section-title" id="storageUsageTitle">{{ t('storage_title') }}</h2>
+      <p class="storage-meter__amounts" id="storageAmounts" {% if not storage.available %}hidden{% endif %}>
+        <span id="storageUsed">{{ storage.used_gb }}</span> {{ t('size_gb_unit') }} {{ t('storage_of') }} <span id="storageLimit">{{ storage.limit_gb }}</span> {{ t('size_gb_unit') }}
+      </p>
+    </div>
+    <div class="storage-meter__track" id="storageProgress" role="progressbar" aria-labelledby="storageUsageTitle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ storage.percent }}" aria-valuetext="{{ storage.used_gb }} {{ t('size_gb_unit') }} {{ t('storage_of') }} {{ storage.limit_gb }} {{ t('size_gb_unit') }}" {% if not storage.available %}hidden{% endif %}>
+      <div class="storage-meter__fill" id="storageFill" style="width: {{ storage.percent }}%"></div>
+    </div>
+    <p class="storage-meter__detail" id="storagePlan" {% if not storage.available %}hidden{% endif %}>{{ t('storage_plan') }}: <span id="storagePlanName">{{ storage.plan }}</span></p>
+    <p class="storage-meter__detail" id="storageReserved" {% if not storage.has_reserved %}hidden{% endif %}>{{ t('storage_reserved') }}: <span id="storageReservedSize">{{ storage.reserved_gb }}</span> {{ t('size_gb_unit') }}</p>
+    <p class="storage-meter__detail" id="storageUnavailable" {% if storage.available %}hidden{% endif %}>{{ t('storage_unavailable') }}</p>
+  </section>
 
   {# ── Successful upload notice ──────────────────────────────────── #}
   {% if notice %}
@@ -213,16 +235,16 @@
         </thead>
         <tbody>
           {% for f in files %}
-          <tr class="file-table__row">
+          <tr class="file-table__row{% if not f.is_approved %} file-table__row--unavailable{% endif %}" data-file-id="{{ f.id }}" data-file-status="{{ f.status }}" {% if not f.is_approved %}aria-describedby="fileStatusTooltip" tabindex="0"{% endif %} {% if f.scan_pending %}aria-busy="true"{% endif %}>
 
             {# File type icon and name #}
-            <td class="file-table__name" title="{{ f.original_name }}">
+            <td class="file-table__name" {% if f.is_approved %}title="{{ f.original_name }}"{% endif %}>
               <span class="file-icon">{{ filetype_icon(f.content_type) }}</span>
               <span class="file-table__name-text">{{ f.original_name }}</span>
             </td>
 
             <td class="file-table__type">
-              <code title="{{ f.content_type }}">{{ f.content_type }}</code>
+              <code {% if f.is_approved %}title="{{ f.content_type }}"{% endif %}>{{ f.content_type }}</code>
             </td>
 
             <td class="file-table__size">{{ filesize(f.size) }}</td>
@@ -233,13 +255,14 @@
             </td>
 
             <td class="file-table__access">
-              <label class="permission-switch" title="{{ t('access') }}">
+              <label class="permission-switch" {% if f.is_approved %}title="{{ t('access') }}"{% endif %}>
                 <input
                   type="checkbox"
                   class="permission-switch__input"
                   data-file-id="{{ f.id }}"
                   data-folder-id="{{ current_folder_id }}"
                   {% if f.is_public %}checked{% endif %}
+                  {% if not f.is_approved %}disabled{% endif %}
                 />
                 <span class="permission-switch__track" aria-hidden="true">
                   <span class="permission-switch__thumb"></span>
@@ -257,15 +280,17 @@
                 data-file-id="{{ f.id }}"
                 data-public-url="/shared-file/{{ f.id }}"
                 data-is-public="{% if f.is_public %}true{% else %}false{% endif %}"
-                title="{{ t('share') }}"
+                {% if f.is_approved %}title="{{ t('share') }}"{% endif %}
                 aria-label="{{ t('share') }}"
+                {% if not f.is_approved %}disabled{% endif %}
               >↗</button>
 
               {# Download button #}
               <a
-                href="/download/{{ f.id }}"
-                class="btn btn--sm btn--outline file-table__action-btn"
-                title="{{ t('download') }}"
+                {% if f.is_approved %}href="/download/{{ f.id }}"{% else %}aria-disabled="true" role="link" tabindex="-1"{% endif %}
+                data-download-url="/download/{{ f.id }}"
+                class="btn btn--sm btn--outline file-table__action-btn file-table__download-btn"
+                {% if f.is_approved %}title="{{ t('download') }}"{% endif %}
               >⬇ {{ t("download") }}</a>
 
               {# Delete button uses a POST form because browsers do not support DELETE forms #}
@@ -303,6 +328,8 @@
   </div>
 
 </div>
+
+<div id="fileStatusTooltip" class="file-status-tooltip" role="tooltip" hidden>{{ t('file_scan_pending') }}</div>
 
 <script src="/static/dashboard.js"></script>
 {% endblock %}

@@ -25,6 +25,7 @@ The application runs as a single Go server. One PostgreSQL database stores cloud
 
 - [Features](#features)
 - [Requirements](#requirements)
+- [Server installation](#server-installation)
 - [Local setup](#local-setup)
 - [Configuration](#configuration)
 - [Using the web interface](#using-the-web-interface)
@@ -54,10 +55,76 @@ The application runs as a single Go server. One PostgreSQL database stores cloud
 | PostgreSQL | Separately stores authentication data and cloud metadata. Both included Compose files use `postgres:17.11-alpine` |
 | Docker with Compose | Starts the two bundled local PostgreSQL services. Optional if you already have PostgreSQL instances |
 | S3-compatible storage | Stores uploaded file contents. Two existing buckets and working credentials are required |
-| File scanning utilities | Requires `file`, `clamdscan`, ImageMagick `identify`, `ffprobe`, `ffmpeg`, and `7z` on the application host |
+| File scanning utilities | With `SCANNER_ENABLED=true`, requires `file`, `clamdscan`, ImageMagick `identify`, `ffprobe`, `ffmpeg`, and `7z` on the application host |
 | Git | Clones the repository |
 
 [compose.db.yaml](compose.db.yaml) and [compose.users_db.yaml](compose.users_db.yaml) start **only PostgreSQL**. The Go server runs on your host, and S3 storage must be configured separately
+
+## Server installation
+
+The dependency installer supports Debian and Ubuntu hosts running systemd. Automatic Go installation supports `amd64` and `arm64`. Run it as root or as a user with `sudo` access after cloning the repository
+
+```sh
+cd lyrarma-cloud
+chmod +x install.sh
+./install.sh
+```
+
+The script performs the following setup
+
+- Installs Git, curl, CA certificates, jq, OpenSSL, lsof, and archive tools
+- Keeps an existing Go installation that satisfies `go.mod`, or installs the latest stable Go release from `go.dev` after verifying its SHA-256 checksum
+- Installs Docker Engine and the Compose plugin from Docker's official package repository when needed, or keeps an existing working installation
+- Reads `SCANNER_ENABLED` from the process environment, then `CONFIG_FILE` or the project `.env`, defaulting to `true`
+- Installs `file`, ClamAV, ImageMagick, FFmpeg, and 7-Zip when scanning is enabled, downloads missing ClamAV databases once, and tests scanning through `clamdscan --stream`
+- Creates a missing `.env` with mode `0600` and generated `JWT_SECRET` and `BETA_TEST_KEY`, preserving an existing configuration file
+- Downloads the Go module dependencies without starting the application or database containers
+
+Go releases installed by the script are stored under `/opt/lyrarma/go<VERSION>`, with `go` and `gofmt` links in `/usr/local/bin`. Existing Docker packages that conflict with Docker CE are reported instead of being automatically removed. A non-root application user may need Docker access configured according to the [Docker post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
+
+Edit `.env` after installation to set the database URLs, both S3 buckets, region, endpoint, credentials, and application limits. Existing configurations must use `SCANNER_ANTIVIRUS_COMMAND="/usr/bin/clamdscan --stream"` to allow scanning private temporary files. Keep or configure `SCANNER_MODERATION_COMMAND` separately when content moderation is required
+
+When using both bundled PostgreSQL services, start the application with
+
+```sh
+./run.sh
+```
+
+When both databases already run elsewhere, skip Docker installation and start the Go server directly
+
+```sh
+./install.sh --skip-docker
+CONFIG_FILE="$PWD/.env" go run ./src
+```
+
+For a remote users database with a local cloud database, use the standalone [remote-users-db](remote-users-db/README.md) directory on the database server, set `USERS_DATABASE_URL` in the application configuration, start only the local cloud database, and run the application directly
+
+```sh
+docker compose -f compose.db.yaml up -d --wait
+CONFIG_FILE="$PWD/.env" go run ./src
+```
+
+The regular `run.sh` always starts both bundled database services
+
+To omit scanning dependencies on a fresh installation, run
+
+```sh
+SCANNER_ENABLED=false ./install.sh
+```
+
+This also sets `SCANNER_ENABLED=false` in a newly generated `.env`. For an existing installation, edit that setting in the configuration file before rerunning the installer, because existing files are never rewritten
+
+If the ClamAV CDN returns `403` or `429`, wait until the cooldown shown by FreshClam has expired before attempting another download. To finish dependency installation without downloading databases or testing ClamAV, run
+
+```sh
+./install.sh --skip-clamav-update
+```
+
+This option leaves the FreshClam updater stopped and defers scanner readiness checks. Install matching database files and their `*.sign` files from a trusted host, or download them with FreshClam after the cooldown, then rerun `./install.sh` to enable the updater and verify scanning. Do not disable database signature verification
+
+ClamAV needs enough memory to load its signature databases. Also check `StreamMaxLength`, `MaxFileSize`, and `MaxScanSize` in `/etc/clamav/clamd.conf` against the upload limits you intend to support, respecting ClamAV's own size limits. Restart `clamav-daemon` after changing these values
+
+Installation sources: [Go](https://go.dev/doc/install), [Docker on Debian](https://docs.docker.com/engine/install/debian/), [Docker on Ubuntu](https://docs.docker.com/engine/install/ubuntu/), [ClamAV packages](https://docs.clamav.net/manual/Installing/Packages.html)
 
 ## Local setup
 
@@ -82,7 +149,7 @@ chmod 600 .env
 Edit `.env` before starting the server:
 
 - Keep `DATABASE_URL` and `USERS_DATABASE_URL` from the template if you use the bundled PostgreSQL services
-- Set your own `JWT_SECRET` and `BETA_TEST_KEY`
+- Set your own `JWT_SECRET` and either configure `BETA_TEST_KEY` or set `BETA_TEST_KEY=""` for registration without a beta key
 - Replace `S3_BUCKET`, `S3_QUARANTINE_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` with your storage settings
 - Install the scanning utilities and set `SCANNER_MODERATION_COMMAND` when semantic content moderation is required
 - Set `S3_ENDPOINT` to your provider's endpoint. Remove the example endpoint for standard AWS S3 endpoint resolution
@@ -160,7 +227,7 @@ Settings are loaded in this order:
 | `DATABASE_URL` | Required | PostgreSQL connection string. The template matches the bundled database |
 | `USERS_DATABASE_URL` | Required | PostgreSQL connection string for the dedicated `lyrarma-services-users` authentication database |
 | `JWT_SECRET` | Required | Secret used to sign and verify authentication tokens. It must contain at least 32 bytes and must not equal the template value |
-| `BETA_TEST_KEY` | Required | Registration key required by both the web form and JSON API. It must contain at least 16 bytes and must not equal the template value |
+| `BETA_TEST_KEY` | Unset | When non-empty, requires a registration key in both the web form and JSON API, must contain at least 16 bytes, and must differ from the template value. An unset or empty value hides the beta-key field and allows registration without it |
 | `JWT_TTL` | `24h` | Lifetime of issued JWTs and browser authentication cookies |
 | `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB. To allow files up to this ceiling, configure the reverse proxy request-body limit at least 1 MiB higher for multipart overhead; use a lower proxy limit only intentionally |
 | `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB |
@@ -204,8 +271,11 @@ The database requires a non-empty, one-dimensional plan array without null value
 
 New uploads are written only to the quarantine bucket with status `uploading`. PostgreSQL acts as the durable queue: workers claim files as `scanning`, run the configured utilities, and store `approved`, `blocked`, or `scan_failed`. Only approved files are copied to the production bucket and made downloadable. Blocked files are removed from quarantine, while failed scans stay quarantined for diagnosis or deletion
 
+File scanning is enabled by default. Set `SCANNER_ENABLED=false` in the server configuration and restart the application to skip MIME detection, hashing, antivirus, media validation, archive inspection, and content moderation. Background workers still move queued uploads from quarantine to the production bucket and mark them as `approved` only after a successful transfer. Previously blocked files and failed scans keep their existing statuses
+
 | Variable | Built-in default | Description |
 | --- | --- | --- |
+| `SCANNER_ENABLED` | `true` | Whether queued uploads are inspected before approval; `false` skips all checks and does not require scanning utilities |
 | `SCANNER_WORKERS` | `2` | Number of concurrent scanner workers |
 | `SCANNER_POLL_INTERVAL` | `2s` | Delay before polling an empty queue again |
 | `SCANNER_TIMEOUT` | `10m` | Maximum duration of one scan and the lease timeout for interrupted work |
@@ -248,7 +318,9 @@ Utility lookup, nonzero error exits, timeouts, malformed output, and truncated o
 
 ## Using the web interface
 
-1. Open `/register`, choose a username, email, and password, and enter the configured `BETA_TEST_KEY`. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes
+The dashboard storage meter shows the occupied space and effective plan limit across all folders, including space reserved by uploads in progress. Values are displayed in GB using 1024³ bytes per GB to match the MiB-based plan configuration, refresh after file or folder deletion, and update every 10 seconds while the page is visible
+
+1. Open `/register`, choose a username, email, and password, and enter `BETA_TEST_KEY` if the server has configured one. With `BETA_TEST_KEY=""`, the field is hidden and no key is required. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes
 2. Sign in at `/login` to open `/dashboard`
 3. Create folders and open the folder where you want to upload files. Select files or drop them into the upload area
 4. Wait for scanning to complete, then download approved files from the dashboard or enable public access to share them
@@ -271,7 +343,7 @@ The browser interface manages its session cookie separately. For direct API call
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | HTTP server health response |
-| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, `password`, and `beta_key` |
+| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, and `password`; `beta_key` is required only when the server's `BETA_TEST_KEY` is non-empty |
 | `POST` | `/api/auth/login` | No | Sign in with JSON `username` and `password`; returns `token` and `expires_at` |
 | `GET` | `/api/files?folder_id=root` | Bearer token | List files in one folder; omitted `folder_id` means `root` |
 | `POST` | `/api/files/upload?folder_id=root` | Bearer token | Upload one multipart form field named `file` to quarantine and return status `uploading` |

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 // S3StoreConfig contains the connection parameters for S3
@@ -191,7 +193,7 @@ func (storage *S3Store) deleteFile(ctx context.Context, bucket, key string) erro
 	return nil
 }
 
-// PromoteQuarantineFile copies an approved object to the primary bucket
+// PromoteQuarantineFile переносит проверенный объект в основной бакет
 func (storage *S3Store) PromoteQuarantineFile(
 	ctx context.Context,
 	quarantineKey, fileKey, contentType string,
@@ -203,8 +205,24 @@ func (storage *S3Store) PromoteQuarantineFile(
 		ContentType:       aws.String(contentType),
 		MetadataDirective: "REPLACE",
 	})
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+
+	var apiError smithy.APIError
+	if !errors.As(err, &apiError) || apiError.ErrorCode() != "InvalidRequest" ||
+		!strings.Contains(strings.ToLower(apiError.ErrorMessage()), "copying manifest objects is not supported") {
 		return fmt.Errorf("promote object %q from quarantine: %w", quarantineKey, err)
+	}
+
+	body, _, err := storage.DownloadQuarantineFile(ctx, quarantineKey)
+	if err != nil {
+		return fmt.Errorf("read object %q for streaming promotion: %w", quarantineKey, err)
+	}
+	defer body.Close()
+
+	if err := storage.UploadFile(ctx, fileKey, body, contentType); err != nil {
+		return fmt.Errorf("promote object %q from quarantine using stream: %w", quarantineKey, err)
 	}
 	return nil
 }
