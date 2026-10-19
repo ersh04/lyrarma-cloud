@@ -62,12 +62,19 @@ func (h *Handler) register(c fiber.Ctx) error {
 	if h.config.BetaTestKey != "" && !equalSecret(c.FormValue("beta_key"), h.config.BetaTestKey) {
 		return h.render(c, "register.html", pongo2.Context{"error": h.message(c, "error_invalid_beta_key")}, fiber.StatusForbidden)
 	}
+	privacyAccepted := c.FormValue("privacy_policy_accepted") == "true"
+	idAccepted := c.FormValue("id_policy_accepted") == "true"
+	if !privacyAccepted || !idAccepted {
+		return h.render(c, "register.html", pongo2.Context{"error": h.message(c, "api_error_policies_not_accepted")}, fiber.StatusBadRequest)
+	}
 
 	response, err := h.callJSON(c, fiber.MethodPost, "/api/auth/register", models.RegisterRequest{
-		Username: username,
-		Password: password,
-		Email:    strings.TrimSpace(c.FormValue("email")),
-		BetaKey:  c.FormValue("beta_key"),
+		Username:              username,
+		Password:              password,
+		Email:                 strings.TrimSpace(c.FormValue("email")),
+		BetaKey:               c.FormValue("beta_key"),
+		PrivacyPolicyAccepted: privacyAccepted,
+		IDPolicyAccepted:      idAccepted,
 	}, "")
 	if err != nil {
 		h.logger.Error("internal registration request failed", "err", err)

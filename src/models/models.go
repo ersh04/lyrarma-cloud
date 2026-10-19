@@ -48,6 +48,9 @@ type RegisterRequest struct {
 
 	// BetaKey authorizes account registration
 	BetaKey string `json:"beta_key"`
+
+	PrivacyPolicyAccepted bool `json:"privacy_policy_accepted"`
+	IDPolicyAccepted      bool `json:"id_policy_accepted"`
 }
 
 // LoginRequest is the sign-in request body

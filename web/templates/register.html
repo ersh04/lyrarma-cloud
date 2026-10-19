@@ -88,6 +88,16 @@
       </div>
       {% endif %}
 
+      <div class="form__acceptance">
+        <input type="checkbox" id="privacy_policy_accepted" name="privacy_policy_accepted" value="true" required />
+        <label for="privacy_policy_accepted">{{ t("policy_accept_prefix") }} <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">{{ t("privacy_policy_title") }}</a></label>
+      </div>
+
+      <div class="form__acceptance">
+        <input type="checkbox" id="id_policy_accepted" name="id_policy_accepted" value="true" required />
+        <label for="id_policy_accepted">{{ t("policy_accept_prefix") }} <a href="/lyrarma-id/policy" target="_blank" rel="noopener noreferrer">{{ t("id_policy_title") }}</a></label>
+      </div>
+
       <button type="submit" class="btn btn--primary btn--full">
         {{ t("signup") }}
       </button>

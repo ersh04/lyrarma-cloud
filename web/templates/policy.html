@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ policy_title }} — {{ t("site_name") }}{% endblock %}
+
+{% block content %}
+<article class="card policy">
+  <h1>{{ policy_title }}</h1>
+  <p class="policy__revision">{{ t("policy_revision") }}</p>
+  <p class="alert alert--warning" role="note">{{ t("policy_draft_notice") }}</p>
+  {% if lang == "ru" %}
+    {% if policy_kind == "privacy" %}
+      {% include "legal/ru/privacy.html" %}
+    {% else %}
+      {% include "legal/ru/id.html" %}
+    {% endif %}
+  {% else %}
+    {% if policy_kind == "privacy" %}
+      {% include "legal/en/privacy.html" %}
+    {% else %}
+      {% include "legal/en/id.html" %}
+    {% endif %}
+  {% endif %}
+  <p><a href="/register">{{ t("back_to_registration") }}</a></p>
+</article>
+{% endblock %}

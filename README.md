@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/release-v3.0.x-lightgrey.svg" alt=""></a>
+  <a href="#"><img src="https://img.shields.io/badge/release-v3.1.x-lightgrey.svg" alt=""></a>
   <a href="#"><img src="https://img.shields.io/badge/Go-v1.26.5-blue.svg" alt="Go"></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs"></a>
@@ -29,6 +29,7 @@ The application runs as a single Go server. One PostgreSQL database stores cloud
 - [Local setup](#local-setup)
 - [Configuration](#configuration)
 - [Using the web interface](#using-the-web-interface)
+- [Policies and registration acceptance](#policies-and-registration-acceptance)
 - [HTTP API](#http-api)
 - [Project structure](#project-structure)
 - [Development](#development)
@@ -320,13 +321,30 @@ Utility lookup, nonzero error exits, timeouts, malformed output, and truncated o
 
 The dashboard storage meter shows the occupied space and effective plan limit across all folders, including space reserved by uploads in progress. Values are displayed in GB using 1024³ bytes per GB to match the MiB-based plan configuration, refresh after file or folder deletion, and update every 10 seconds while the page is visible
 
-1. Open `/register`, choose a username, email, and password, and enter `BETA_TEST_KEY` if the server has configured one. With `BETA_TEST_KEY=""`, the field is hidden and no key is required. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes
+1. Open `/register`, choose a username, email, and password, read and separately accept both policies, and enter `BETA_TEST_KEY` if the server has configured one. With `BETA_TEST_KEY=""`, the field is hidden and no key is required. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes
 2. Sign in at `/login` to open `/dashboard`
 3. Create folders and open the folder where you want to upload files. Select files or drop them into the upload area
 4. Wait for scanning to complete, then download approved files from the dashboard or enable public access to share them
 5. Share `/shared-file/<fileID>` for a file or `/shared-folder/<folderID>` for a folder. Visitors can download public content without signing in
 
 Making a folder public exposes its entire subtree through the folder ZIP download, including files whose individual `is_public` flag is false. Changing a folder's visibility does not rewrite the access flags of its descendants. Deleting a folder removes its nested folders and files; there is no recycle bin in the current implementation
+
+## Policies and registration acceptance
+
+Both policies are publicly accessible without signing in and use the current interface language, with English and Russian versions available through the language switch
+
+| Document | Public URL | English source | Russian source |
+| --- | --- | --- | --- |
+| Lyrarma Cloud Privacy Policy | `/privacy-policy` | [privacy.html](web/templates/legal/en/privacy.html) | [privacy.html](web/templates/legal/ru/privacy.html) |
+| Lyrarma ID System Policy | `/lyrarma-id/policy` | [id.html](web/templates/legal/en/id.html) | [id.html](web/templates/legal/ru/id.html) |
+
+Registration has two separate required checkboxes, initially unchecked, linking to the documents in new tabs. Acceptance is checked by the web handler and independently by the JSON API before account creation. API clients must send the JSON booleans `privacy_policy_accepted: true` and `id_policy_accepted: true`; missing, `null`, or `false` values do not count as acceptance, and strings are rejected. These checks apply to new registrations and do not sign out existing users
+
+The current implementation validates acceptance at registration but does not persist a separate acceptance audit record, policy revision, timestamp or IP address. If your deployment needs proof of acceptance, add an appropriate retention-limited audit mechanism before launch
+
+The policy texts are deployment drafts, not a guarantee of legal compliance. Before publishing, replace every square-bracketed placeholder in **both languages** with the actual operator identity, working contact, legal grounds, providers and countries, retention and backup schedules, request procedures and deadlines, cookie settings, and applicable audience requirements. Review the texts against the real configuration and applicable law, then update the revision label and draft notice in [translations.json](web/static/translations.json). Keep both translations in sync and obtain any additional legally required consents separately; accepting a privacy notice is not blanket consent to all processing
+
+For background on clear privacy notices and data-subject requests, see the [EDPB guidance](https://www.edpb.europa.eu/sme/be-compliant/respect-individuals-rights_en). Whether GDPR or other legislation applies depends on the operator and deployment
 
 ## HTTP API
 
@@ -343,7 +361,7 @@ The browser interface manages its session cookie separately. For direct API call
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | HTTP server health response |
-| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, and `password`; `beta_key` is required only when the server's `BETA_TEST_KEY` is non-empty |
+| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, `password`, `privacy_policy_accepted: true`, and `id_policy_accepted: true`; `beta_key` is required only when the server's `BETA_TEST_KEY` is non-empty |
 | `POST` | `/api/auth/login` | No | Sign in with JSON `username` and `password`; returns `token` and `expires_at` |
 | `GET` | `/api/files?folder_id=root` | Bearer token | List files in one folder; omitted `folder_id` means `root` |
 | `POST` | `/api/files/upload?folder_id=root` | Bearer token | Upload one multipart form field named `file` to quarantine and return status `uploading` |
@@ -371,7 +389,7 @@ Register an example account:
 ```sh
 curl -X POST http://localhost:8080/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"demo","email":"demo@example.com","password":"example-password","beta_key":"your-beta-test-key"}'
+  -d '{"username":"demo","email":"demo@example.com","password":"example-password","beta_key":"your-beta-test-key","privacy_policy_accepted":true,"id_policy_accepted":true}'
 ```
 
 Sign in:

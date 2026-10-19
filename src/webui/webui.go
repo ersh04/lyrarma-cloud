@@ -58,7 +58,7 @@ func New(api *fiber.App, config Config, logger *slog.Logger) (*Handler, error) {
 	templateSet.Debug = false
 
 	templates := make(map[string]*pongo2.Template)
-	for _, name := range []string{"login.html", "register.html", "dashboard.html", "shared_file.html", "shared_folder.html"} {
+	for _, name := range []string{"login.html", "register.html", "dashboard.html", "shared_file.html", "shared_folder.html", "policy.html"} {
 		parsed, err := templateSet.FromFile(name)
 		if err != nil {
 			return nil, fmt.Errorf("load template %s: %w", name, err)
@@ -92,6 +92,8 @@ func (h *Handler) registerRoutes() {
 	h.api.Post("/login", h.login)
 	h.api.Get("/register", h.registerPage)
 	h.api.Post("/register", h.register)
+	h.api.Get("/privacy-policy", h.privacyPolicy)
+	h.api.Get("/lyrarma-id/policy", h.idPolicy)
 	h.api.Get("/logout", h.requireSession, h.logout)
 	h.api.Get("/dashboard", h.requireSession, h.dashboard)
 	h.api.Get("/files/status", h.requireSession, h.fileStatuses)

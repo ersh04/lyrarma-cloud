@@ -64,6 +64,10 @@ func (h *AuthHandler) Register(c fiber.Ctx) {
 		return
 	}
 
+	if !request.PrivacyPolicyAccepted || !request.IDPolicyAccepted {
+		httpresponse.WriteError(c, fiber.StatusBadRequest, "policies_not_accepted", "both policies must be accepted")
+		return
+	}
 	request.Username = strings.TrimSpace(request.Username)
 	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
 	if len(request.Username) < 3 {

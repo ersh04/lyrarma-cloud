@@ -45,6 +45,9 @@ func TestRegistrationOptionalBetaKey(t *testing.T) {
 				if request.Username != "alice" || request.BetaKey != test.submittedKey {
 					t.Errorf("unexpected registration payload: %+v", request)
 				}
+				if !request.PrivacyPolicyAccepted || !request.IDPolicyAccepted {
+					t.Error("registration payload is missing policy acceptance")
+				}
 				return c.Status(test.apiStatus).JSON(fiber.Map{"message": "registration response"})
 			})
 			_, err := New(app, Config{
@@ -75,6 +78,7 @@ func TestRegistrationOptionalBetaKey(t *testing.T) {
 			form := url.Values{
 				"username": {"alice"}, "email": {"alice@example.com"},
 				"password": {"test-password"}, "password_confirm": {"test-password"},
+				"privacy_policy_accepted": {"true"}, "id_policy_accepted": {"true"},
 			}
 			if test.submittedKey != "" {
 				form.Set("beta_key", test.submittedKey)

@@ -32,7 +32,7 @@ func TestRegisterOptionalBetaKey(t *testing.T) {
 				handler.Register(c)
 				return nil
 			})
-			payload, err := json.Marshal(models.RegisterRequest{BetaKey: test.supplied})
+			payload, err := json.Marshal(models.RegisterRequest{BetaKey: test.supplied, PrivacyPolicyAccepted: true, IDPolicyAccepted: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -49,6 +49,47 @@ func TestRegisterOptionalBetaKey(t *testing.T) {
 			}
 			if response.StatusCode != test.wantStatus || result.Error != test.wantError {
 				t.Errorf("status=%d, error=%q; want status=%d, error=%q", response.StatusCode, result.Error, test.wantStatus, test.wantError)
+			}
+		})
+	}
+}
+
+func TestRegisterRequiresBothPolicies(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		payload   string
+		wantError string
+	}{
+		{name: "missing both", payload: `{}`, wantError: "policies_not_accepted"},
+		{name: "missing privacy", payload: `{"id_policy_accepted":true}`, wantError: "policies_not_accepted"},
+		{name: "missing ID", payload: `{"privacy_policy_accepted":true}`, wantError: "policies_not_accepted"},
+		{name: "privacy false", payload: `{"privacy_policy_accepted":false,"id_policy_accepted":true}`, wantError: "policies_not_accepted"},
+		{name: "ID false", payload: `{"privacy_policy_accepted":true,"id_policy_accepted":false}`, wantError: "policies_not_accepted"},
+		{name: "null", payload: `{"privacy_policy_accepted":null,"id_policy_accepted":null}`, wantError: "policies_not_accepted"},
+		{name: "privacy string", payload: `{"privacy_policy_accepted":"true","id_policy_accepted":true}`, wantError: "invalid_body"},
+		{name: "ID string", payload: `{"privacy_policy_accepted":true,"id_policy_accepted":"true"}`, wantError: "invalid_body"},
+		{name: "both accepted", payload: `{"privacy_policy_accepted":true,"id_policy_accepted":true}`, wantError: "validation_error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &AuthHandler{}
+			app := fiber.New(fiber.Config{StreamRequestBody: true})
+			app.Post("/register", func(c fiber.Ctx) error {
+				handler.Register(c)
+				return nil
+			})
+			request := httptest.NewRequest("POST", "/register", strings.NewReader(test.payload))
+			request.Header.Set("Content-Type", "application/json")
+			response, err := app.Test(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var result models.ErrorResponse
+			if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != 400 || result.Error != test.wantError {
+				t.Errorf("status=%d, error=%q; want status=400, error=%q", response.StatusCode, result.Error, test.wantError)
 			}
 		})
 	}

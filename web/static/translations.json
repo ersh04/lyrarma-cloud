@@ -1,5 +1,13 @@
 {
   "ru": {
+    "privacy_policy_title": "Политика конфиденциальности Lyrarma Cloud",
+    "id_policy_title": "Политика Lyrarma ID System",
+    "policy_accept_prefix": "Я ознакомился(ась) и принимаю документ:",
+    "policies_navigation": "Политики сервиса",
+    "policy_revision": "Редакция проекта от 19 октября 2026 года",
+    "policy_draft_notice": "Проект документа: оператор должен заполнить поля в квадратных скобках и подтвердить условия обработки до публикации окончательной редакции",
+    "back_to_registration": "Вернуться к регистрации",
+    "api_error_policies_not_accepted": "Для регистрации необходимо отдельно принять обе политики",
     "site_name": "Lyrarma Cloud",
     "logout": "Выйти",
     "login": "Войти",
@@ -165,6 +173,14 @@
     "cookie_test_api_origin": "Адрес API"
   },
   "en": {
+    "privacy_policy_title": "Lyrarma Cloud Privacy Policy",
+    "id_policy_title": "Lyrarma ID System Policy",
+    "policy_accept_prefix": "I have read and accept this document:",
+    "policies_navigation": "Service policies",
+    "policy_revision": "Draft revision dated 19 October 2026",
+    "policy_draft_notice": "Draft document: the operator must complete the square-bracketed fields and verify the processing terms before publishing the final revision",
+    "back_to_registration": "Back to registration",
+    "api_error_policies_not_accepted": "You must accept both policies separately to register",
     "site_name": "Lyrarma Cloud",
     "logout": "Logout",
     "login": "Login",
