@@ -199,6 +199,7 @@ main() {
     prepare_config
     if [[ "$scanner_enabled" == true ]]; then
         install_scanner
+        bash "$INSTALL_DIR/tools/nudenet/install.sh"
     else
         printf 'SCANNER_ENABLED=false: scanning dependencies and ClamAV setup skipped\n'
     fi

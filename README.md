@@ -57,6 +57,7 @@ The application runs as a single Go server. One PostgreSQL database stores cloud
 | Docker with Compose | Starts the two bundled local PostgreSQL services. Optional if you already have PostgreSQL instances |
 | S3-compatible storage | Stores uploaded file contents. Two existing buckets and working credentials are required |
 | File scanning utilities | With `SCANNER_ENABLED=true`, requires `file`, `clamdscan`, ImageMagick `identify`, `ffprobe`, `ffmpeg`, and `7z` on the application host |
+| Python 3 with venv | Runs the bundled NudeNet adapter in an isolated environment when configured through `SCANNER_MODERATION_COMMAND` |
 | Git | Clones the repository |
 
 [compose.db.yaml](compose.db.yaml) and [compose.users_db.yaml](compose.users_db.yaml) start **only PostgreSQL**. The Go server runs on your host, and S3 storage must be configured separately
@@ -78,12 +79,13 @@ The script performs the following setup
 - Installs Docker Engine and the Compose plugin from Docker's official package repository when needed, or keeps an existing working installation
 - Reads `SCANNER_ENABLED` from the process environment, then `CONFIG_FILE` or the project `.env`, defaulting to `true`
 - Installs `file`, ClamAV, ImageMagick, FFmpeg, and 7-Zip when scanning is enabled, downloads missing ClamAV databases once, and tests scanning through `clamdscan --stream`
+- Installs the local NudeNet image moderation adapter in an isolated Python environment and verifies the bundled model when scanning is enabled
 - Creates a missing `.env` with mode `0600` and generated `JWT_SECRET` and `BETA_TEST_KEY`, preserving an existing configuration file
 - Downloads the Go module dependencies without starting the application or database containers
 
 Go releases installed by the script are stored under `/opt/lyrarma/go<VERSION>`, with `go` and `gofmt` links in `/usr/local/bin`. Existing Docker packages that conflict with Docker CE are reported instead of being automatically removed. A non-root application user may need Docker access configured according to the [Docker post-install instructions](https://docs.docker.com/engine/install/linux-postinstall/)
 
-Edit `.env` after installation to set the database URLs, both S3 buckets, region, endpoint, credentials, and application limits. Existing configurations must use `SCANNER_ANTIVIRUS_COMMAND="/usr/bin/clamdscan --stream"` to allow scanning private temporary files. Keep or configure `SCANNER_MODERATION_COMMAND` separately when content moderation is required
+Edit `.env` after installation to set the database URLs, both S3 buckets, region, endpoint, credentials, and application limits. Existing configurations must use `SCANNER_ANTIVIRUS_COMMAND="/usr/bin/clamdscan --stream"` to allow scanning private temporary files. New configurations enable the bundled NudeNet adapter through `SCANNER_MODERATION_COMMAND`; existing configurations and custom moderation commands are preserved, so follow the NudeNet setup below to enable it explicitly
 
 When using both bundled PostgreSQL services, start the application with
 
@@ -291,9 +293,50 @@ File scanning is enabled by default. Set `SCANNER_ENABLED=false` in the server c
 | `SCANNER_MAX_ARCHIVE_FILES` | `10000` | Maximum total file count across nested archives |
 | `SCANNER_MAX_ARCHIVE_MB` | `5120` | Maximum declared unpacked size across nested archives in MiB |
 | `SCANNER_MAX_IMAGE_PIXELS` | `100000000` | Maximum width multiplied by height for an uploaded image |
-| `SCANNER_BLOCKED_MIME_TYPES` | Executable MIME types | Comma-separated denylist based on detected content rather than the submitted filename |
+| `SCANNER_BLOCKED_MIME_TYPES` | Executable MIME types when absent | Comma-separated denylist based on detected content rather than the submitted filename. An explicitly empty value disables type blocking only; antivirus and other enabled checks still run. A process environment value takes precedence over the configuration file, including an empty value |
 
 Utility lookup, nonzero error exits, timeouts, malformed output, and truncated output fail closed as `scan_failed`. The moderation command is intentionally provider-neutral so deployments can connect a local model, perceptual-hash service, or external moderation adapter
+
+#### Local NudeNet moderation
+
+The bundled adapter uses [NudeNet 3.4.2](https://pypi.org/project/nudenet/3.4.2/) and its included `320n` model on CPU. File contents are inspected locally without uploading them to an external moderation API. Installation downloads Python packages and model weights contained in the package; runtime inference does not require a network connection
+
+The main installer sets up NudeNet when scanning is enabled. On an existing Debian/Ubuntu server, install or update only this adapter with
+
+```sh
+bash tools/nudenet/install.sh
+```
+
+Set the following line in the active server configuration and restart the application
+
+```dotenv
+SCANNER_MODERATION_COMMAND="/opt/lyrarma/nudenet/venv/bin/python /opt/lyrarma/nudenet/moderate.py"
+```
+
+The standalone installer preserves `.env`, installs dependencies in `/opt/lyrarma/nudenet/venv`, copies the adapter to `/opt/lyrarma/nudenet/moderate.py`, and runs a real model self-test. It requires root or sudo access. Repeat it after updating the adapter source; updating the repository alone does not update the installed copy
+
+By default, detections with confidence at least `0.6` block these classes: `FEMALE_GENITALIA_EXPOSED`, `MALE_GENITALIA_EXPOSED`, `ANUS_EXPOSED`, `FEMALE_BREAST_EXPOSED`, and `BUTTOCKS_EXPOSED`. Faces, exposed bellies, male chests, and covered body parts do not trigger the default policy. These are configurable service rules, not a legal determination; test false positives on representative allowed content before using automatic deletion
+
+Tune the adapter through command-line options placed before the file path and MIME type that the scanner appends
+
+```dotenv
+SCANNER_MODERATION_COMMAND="/opt/lyrarma/nudenet/venv/bin/python /opt/lyrarma/nudenet/moderate.py --threshold 0.8 --classes FEMALE_GENITALIA_EXPOSED,MALE_GENITALIA_EXPOSED,ANUS_EXPOSED"
+```
+
+All frames/pages of GIF, animated WebP and multi-page images are checked, up to `--max-frames 120`. The per-frame limit is `--max-pixels 25000000`; exceeding a limit, unsupported image decoding, missing dependencies, inference errors and malformed model output return exit code `2` and produce `scan_failed`, not approval. A matching detection returns `1` and produces `blocked` with reason `content_policy`; a successful image check returns `0`
+
+The adapter reports `not_applicable` and returns `0` for non-image MIME types, leaving the other scanner checks in place. It does not semantically moderate text, audio, violence, symbols, or images embedded in PDF/Office documents. Existing video scanning extracts at most 120 JPEG frames at five-second intervals; audio and content between sampled frames are not inspected. Recognized archives are inspected through the existing recursive scanner
+
+Each adapter invocation loads the model once; video frames are separate invocations. On memory-constrained hosts, consider `SCANNER_WORKERS=1` and measure resource usage together with ClamAV and PostgreSQL. `SCANNER_ENABLED=false` skips NudeNet along with every other inspection
+
+Licensing requires review for the selected package and weights: upstream [PyPI metadata](https://pypi.org/project/nudenet/3.4.2/) declares MIT, while the upstream repository [LICENSE](https://github.com/notAI-tech/NudeNet/blob/v3/LICENSE) declares AGPL-3.0. The adapter does not change those third-party terms
+
+Verify the installed model or run adapter tests with
+
+```sh
+/opt/lyrarma/nudenet/venv/bin/python /opt/lyrarma/nudenet/moderate.py --self-test
+/opt/lyrarma/nudenet/venv/bin/python -m unittest discover -s tools/nudenet -v
+```
 
 ### HTTP server and web resources
 

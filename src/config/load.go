@@ -189,7 +189,12 @@ func Load() (Config, error) {
 	if cfg.scanner.maxImagePixels, err = positiveInt64Value(values, scannerMaxImagePixelsEnv, cfg.scanner.maxImagePixels); err != nil {
 		return Config{}, err
 	}
-	if rawBlockedMIMEs := value(values, scannerBlockedMIMEsEnv, ""); rawBlockedMIMEs != "" {
+	// Явно пустое значение отключает запрет типов, отсутствие настройки сохраняет встроенный список
+	rawBlockedMIMEs, blockedMIMEsConfigured := os.LookupEnv(scannerBlockedMIMEsEnv)
+	if !blockedMIMEsConfigured {
+		rawBlockedMIMEs, blockedMIMEsConfigured = values[scannerBlockedMIMEsEnv]
+	}
+	if blockedMIMEsConfigured {
 		cfg.scanner.blockedMIMETypes = commaSeparatedValues(rawBlockedMIMEs)
 	}
 

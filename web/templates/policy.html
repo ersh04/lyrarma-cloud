@@ -5,7 +5,6 @@
 <article class="card policy">
   <h1>{{ policy_title }}</h1>
   <p class="policy__revision">{{ t("policy_revision") }}</p>
-  <p class="alert alert--warning" role="note">{{ t("policy_draft_notice") }}</p>
   {% if lang == "ru" %}
     {% if policy_kind == "privacy" %}
       {% include "legal/ru/privacy.html" %}

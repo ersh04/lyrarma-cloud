@@ -163,7 +163,7 @@
     <section class="file-manager__content">
       <div class="card workspace-head">
         <div>
-          <h2 class="workspace-head__title">{{ t("file_manager") }}</h2>
+          <h2 class="workspace-head__title" id="fileManagerTitle">{{ t("file_manager") }}</h2>
           <p class="workspace-head__path">{{ t("opened_folder") }} <strong>{{ current_folder_name }}</strong></p>
         </div>
         <span class="dashboard__count">{{ files | length }} {{ files_word }}</span>
@@ -213,8 +213,8 @@
 
       {# ── File table ─────────────────────────────────────────────────── #}
       {% if files %}
-      <div class="card card--table">
-        <table class="file-table">
+      <div class="card card--table file-list" role="region" aria-labelledby="fileManagerTitle" tabindex="0">
+        <table class="file-table" role="table" aria-labelledby="fileManagerTitle">
         <colgroup>
           <col class="file-table__col file-table__col--name" />
           <col class="file-table__col file-table__col--type" />
@@ -223,38 +223,38 @@
           <col class="file-table__col file-table__col--access" />
           <col class="file-table__col file-table__col--actions" />
         </colgroup>
-        <thead>
-          <tr>
-            <th>{{ t("file_name") }}</th>
-            <th>{{ t("file_type") }}</th>
-            <th>{{ t("file_size") }}</th>
-            <th>{{ t("upload_date") }}</th>
-            <th>{{ t("access") }}</th>
-            <th>{{ t("actions") }}</th>
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader">{{ t("file_name") }}</th>
+            <th scope="col" role="columnheader">{{ t("file_type") }}</th>
+            <th scope="col" role="columnheader">{{ t("file_size") }}</th>
+            <th scope="col" role="columnheader">{{ t("upload_date") }}</th>
+            <th scope="col" role="columnheader">{{ t("access") }}</th>
+            <th scope="col" role="columnheader">{{ t("actions") }}</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {% for f in files %}
-          <tr class="file-table__row{% if not f.is_approved %} file-table__row--unavailable{% endif %}" data-file-id="{{ f.id }}" data-file-status="{{ f.status }}" {% if not f.is_approved %}aria-describedby="fileStatusTooltip" tabindex="0"{% endif %} {% if f.scan_pending %}aria-busy="true"{% endif %}>
+          <tr role="row" class="file-table__row{% if not f.is_approved %} file-table__row--unavailable{% endif %}" data-file-id="{{ f.id }}" data-file-status="{{ f.status }}" {% if not f.is_approved %}aria-describedby="fileStatusTooltip" tabindex="0"{% endif %} {% if f.scan_pending %}aria-busy="true"{% endif %}>
 
             {# File type icon and name #}
-            <td class="file-table__name" {% if f.is_approved %}title="{{ f.original_name }}"{% endif %}>
+            <td role="cell" class="file-table__name" {% if f.is_approved %}title="{{ f.original_name }}"{% endif %}>
               <span class="file-icon">{{ filetype_icon(f.content_type) }}</span>
               <span class="file-table__name-text">{{ f.original_name }}</span>
             </td>
 
-            <td class="file-table__type">
+            <td role="cell" class="file-table__type" data-label="{{ t('file_type') }}">
               <code {% if f.is_approved %}title="{{ f.content_type }}"{% endif %}>{{ f.content_type }}</code>
             </td>
 
-            <td class="file-table__size">{{ filesize(f.size) }}</td>
+            <td role="cell" class="file-table__size" data-label="{{ t('file_size') }}">{{ filesize(f.size) }}</td>
 
-            <td class="file-table__date">
+            <td role="cell" class="file-table__date" data-label="{{ t('upload_date') }}">
               {# Format the ISO date in JavaScript #}
               <time datetime="{{ f.uploaded_at }}">{{ f.uploaded_at }}</time>
             </td>
 
-            <td class="file-table__access">
+            <td role="cell" class="file-table__access" data-label="{{ t('access') }}">
               <label class="permission-switch" {% if f.is_approved %}title="{{ t('access') }}"{% endif %}>
                 <input
                   type="checkbox"
@@ -273,7 +273,7 @@
               </label>
             </td>
 
-            <td class="file-table__actions">
+            <td role="cell" class="file-table__actions">
               <button
                 type="button"
                 class="btn btn--sm btn--outline file-table__action-btn file-table__share-btn"

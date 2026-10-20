@@ -53,9 +53,63 @@ func TestDashboardFileActions(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				fileList := findElementByClass(document, "file-list")
+				if fileList == nil {
+					t.Fatal("scrollable file list not rendered")
+				}
+				if role, _ := elementAttribute(fileList, "role"); role != "region" {
+					t.Errorf("incorrect file list role: %q", role)
+				}
+				if focus, _ := elementAttribute(fileList, "tabindex"); focus != "0" {
+					t.Error("file list must support keyboard scrolling")
+				}
+				table := findElementByClass(fileList, "file-table")
+				if table == nil {
+					t.Fatal("file table not rendered")
+				}
+				if role, _ := elementAttribute(table, "role"); role != "table" {
+					t.Error("responsive file list must retain its accessible table role")
+				}
+				title := findElementByClass(document, "workspace-head__title")
+				if title == nil {
+					t.Fatal("file list title not rendered")
+				}
+				titleID, _ := elementAttribute(title, "id")
+				if label, _ := elementAttribute(fileList, "aria-labelledby"); titleID == "" || label != titleID {
+					t.Error("file list must reference its localized title")
+				}
+				if title.FirstChild == nil || title.FirstChild.Data != translations[language]["file_manager"] {
+					t.Error("incorrect localized file list title")
+				}
+				for _, class := range []string{"upload-card", "file-manager__sidebar", "workspace-head", "storage-meter"} {
+					if findElementByClass(fileList, class) != nil {
+						t.Errorf("%s must remain outside the scrollable file list", class)
+					}
+				}
 				row := findElementByClass(document, "file-table__row")
 				if row == nil {
 					t.Fatal("file row not rendered")
+				}
+				if findElementByClass(fileList, "file-table__row") != row {
+					t.Error("file rows must be inside the scrollable file list")
+				}
+				if role, _ := elementAttribute(row, "role"); role != "row" {
+					t.Error("file cards must retain their accessible table row role")
+				}
+				for class, key := range map[string]string{
+					"file-table__type": "file_type", "file-table__size": "file_size",
+					"file-table__date": "upload_date", "file-table__access": "access",
+				} {
+					cell := findElementByClass(row, class)
+					if cell == nil {
+						t.Fatalf("missing file card field %s", class)
+					}
+					if label, _ := elementAttribute(cell, "data-label"); label == "" || label != translations[language][key] {
+						t.Errorf("incorrect localized mobile label for %s: %q", class, label)
+					}
+					if role, _ := elementAttribute(cell, "role"); role != "cell" {
+						t.Errorf("file card field %s must retain its accessible table cell role", class)
+					}
 				}
 				tooltip := findElementByClass(document, "file-status-tooltip")
 				if tooltip == nil {

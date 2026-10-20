@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,64 @@ func TestLoadScannerEnabled(t *testing.T) {
 			}
 			if got := cfg.Scanner().Enabled(); got != test.want {
 				t.Errorf("scanner enabled = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestLoadScannerBlockedMIMETypes(t *testing.T) {
+	defaultMIMEs := []string{
+		"application/x-dosexec",
+		"application/x-executable",
+		"application/x-elf",
+		"application/x-mach-binary",
+		"application/x-object",
+		"application/x-pie-executable",
+		"application/x-sharedlib",
+		"application/x-msdownload",
+		"application/vnd.microsoft.portable-executable",
+	}
+	for _, test := range []struct {
+		name        string
+		fileContent string
+		envSet      bool
+		envValue    string
+		want        []string
+	}{
+		{name: "absent preserves defaults", want: defaultMIMEs},
+		{name: "empty file value disables denylist", fileContent: "SCANNER_BLOCKED_MIME_TYPES=\n"},
+		{name: "quoted empty file value disables denylist", fileContent: "SCANNER_BLOCKED_MIME_TYPES=\"\"\n"},
+		{name: "whitespace file value disables denylist", fileContent: "SCANNER_BLOCKED_MIME_TYPES=\"  \"\n"},
+		{name: "custom file list", fileContent: "SCANNER_BLOCKED_MIME_TYPES=\" IMAGE/SVG+XML, application/pdf \"\n", want: []string{"image/svg+xml", "application/pdf"}},
+		{name: "empty environment disables denylist", envSet: true},
+		{name: "whitespace environment disables denylist", envSet: true, envValue: " \t "},
+		{name: "custom environment list", envSet: true, envValue: " APPLICATION/PDF, IMAGE/SVG+XML ", want: []string{"application/pdf", "image/svg+xml"}},
+		{name: "empty environment overrides file list", envSet: true, fileContent: "SCANNER_BLOCKED_MIME_TYPES=application/pdf\n"},
+		{name: "environment overrides file list", envSet: true, envValue: "image/svg+xml", fileContent: "SCANNER_BLOCKED_MIME_TYPES=application/pdf\n", want: []string{"image/svg+xml"}},
+		{name: "environment overrides empty file value", envSet: true, envValue: "application/pdf", fileContent: "SCANNER_BLOCKED_MIME_TYPES=\n", want: []string{"application/pdf"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(scannerAntivirusEnv, "clamdscan")
+			t.Setenv(scannerModerationEnv, "test-moderator")
+			t.Setenv(scannerBlockedMIMEsEnv, test.envValue)
+			if !test.envSet {
+				if err := os.Unsetenv(scannerBlockedMIMEsEnv); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(os.Getenv(configFileEnv), []byte(test.fileContent), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Scanner().BlockedMIMETypes(); !slices.Equal(got, test.want) {
+				t.Errorf("blocked MIME types = %v, want %v", got, test.want)
+			}
+			if !cfg.Scanner().Enabled() || cfg.Scanner().AntivirusCommand() != "clamdscan" || cfg.Scanner().ModerationCommand() != "test-moderator" {
+				t.Error("changing the MIME denylist must not disable scanning, antivirus or moderation")
 			}
 		})
 	}
