@@ -205,11 +205,11 @@ func Load() (Config, error) {
 		cfg.scanner.blockedMIMETypes = commaSeparatedValues(rawBlockedMIMEs)
 	}
 
-	hardMaxFile, err := requiredMebibytesValue(values, hardMaxUploadMBEnv)
+	hardMaxFile, err := requiredMebibytesOrMaxValue(values, hardMaxUploadMBEnv)
 	if err != nil {
 		return Config{}, err
 	}
-	hardMaxStorage, err := requiredMebibytesValue(values, hardMaxStorageMBEnv)
+	hardMaxStorage, err := requiredMebibytesOrMaxValue(values, hardMaxStorageMBEnv)
 	if err != nil {
 		return Config{}, err
 	}
@@ -269,14 +269,14 @@ func loadUserPlans(values map[string]string) (string, map[string]UserLimits, err
 		if _, exists := plans[name]; exists {
 			return "", nil, fmt.Errorf("%s contains duplicate service plan %q", userPlansJSONEnv, name)
 		}
-		maxStorage, err := mebibytesValue(
+		maxStorage, err := mebibytesOrMaxValue(
 			configuredPlan.MaxStorageMB,
 			fmt.Sprintf("%s[%d].max_storage_mb", userPlansJSONEnv, index),
 		)
 		if err != nil {
 			return "", nil, err
 		}
-		maxFile, err := mebibytesValue(
+		maxFile, err := mebibytesOrMaxValue(
 			configuredPlan.MaxUploadMB,
 			fmt.Sprintf("%s[%d].max_upload_mb", userPlansJSONEnv, index),
 		)
@@ -296,6 +296,20 @@ func loadUserPlans(values map[string]string) (string, map[string]UserLimits, err
 func mebibytesValue(parsed int64, name string) (int64, error) {
 	if parsed <= 0 {
 		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if parsed > maxInt64/mebibyte {
+		return 0, fmt.Errorf("%s contains a value that is too large", name)
+	}
+	return parsed * mebibyte, nil
+}
+
+func mebibytesOrMaxValue(parsed int64, name string) (int64, error) {
+	if parsed == -1 {
+		return -1, nil
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero or -1", name)
 	}
 	const maxInt64 = int64(^uint64(0) >> 1)
 	if parsed > maxInt64/mebibyte {
@@ -448,6 +462,18 @@ func requiredMebibytesValue(values map[string]string, name string) (int64, error
 	return mebibytesValue(parsed, name)
 }
 
+func requiredMebibytesOrMaxValue(values map[string]string, name string) (int64, error) {
+	rawValue := value(values, name, "")
+	if rawValue == "" {
+		return 0, fmt.Errorf("%s is required", name)
+	}
+	parsed, err := strconv.ParseInt(rawValue, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer number of MiB: %w", name, err)
+	}
+	return mebibytesOrMaxValue(parsed, name)
+}
+
 func positiveIntegerValue(values map[string]string, name string, fallback int) (int, error) {
 	rawValue := value(values, name, strconv.Itoa(fallback))
 	parsed, err := strconv.Atoi(rawValue)
@@ -460,6 +486,18 @@ func positiveIntegerValue(values map[string]string, name string, fallback int) (
 	return parsed, nil
 }
 
+func positiveOrMinusOneIntegerValue(values map[string]string, name string, fallback int) (int, error) {
+	rawValue := value(values, name, strconv.Itoa(fallback))
+	parsed, err := strconv.Atoi(rawValue)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer: %w", name, err)
+	}
+	if parsed <= 0 && parsed != -1 {
+		return 0, fmt.Errorf("%s must be greater than zero or -1", name)
+	}
+	return parsed, nil
+}
+
 func positiveInt64Value(values map[string]string, name string, fallback int64) (int64, error) {
 	rawValue := value(values, name, strconv.FormatInt(fallback, 10))
 	parsed, err := strconv.ParseInt(rawValue, 10, 64)
@@ -468,6 +506,18 @@ func positiveInt64Value(values map[string]string, name string, fallback int64) (
 	}
 	if parsed <= 0 {
 		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+	return parsed, nil
+}
+
+func positiveOrMinusOneInt64Value(values map[string]string, name string, fallback int64) (int64, error) {
+	rawValue := value(values, name, strconv.FormatInt(fallback, 10))
+	parsed, err := strconv.ParseInt(rawValue, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must contain an integer: %w", name, err)
+	}
+	if parsed <= 0 && parsed != -1 {
+		return 0, fmt.Errorf("%s must be greater than zero or -1", name)
 	}
 	return parsed, nil
 }

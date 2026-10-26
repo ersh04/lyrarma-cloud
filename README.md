@@ -239,8 +239,8 @@ Settings are loaded in this order:
 | `POST_CONTROLLER_BASE_URL` | Unset | Optional base URL for the post controller, available through `Config.PostControllerBaseURL()` and `Config.PostControllerURL()` |
 | `POST_CONTROLLER_TOKEN` | Unset | Optional post controller authentication token, available through `Config.PostControllerToken()`; keep it secret |
 | `REGISTRATION_CONFIRMATION_URL` | Unset | Absolute HTTP(S) confirmation page URL without the registration key; the sender adds the URL-encoded `key` query parameter. Required to prepare confirmation emails |
-| `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB. To allow files up to this ceiling, configure the reverse proxy request-body limit at least 1 MiB higher for multipart overhead; use a lower proxy limit only intentionally |
-| `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB |
+| `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB, or `-1` for no configured ceiling. For a finite ceiling, allow at least 1 MiB more in the reverse proxy request-body limit for multipart overhead |
+| `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB, or `-1` for no configured ceiling |
 | `DEFAULT_USER_PLAN` | Required | Name placed in the initial plan list for new users and legacy accounts without a plan during migration |
 | `USER_PLANS_JSON` | Required | JSON array of plan objects with `name`, `max_upload_mb`, and `max_storage_mb` |
 | `S3_BUCKET` | Required | Existing bucket for file contents |
@@ -256,7 +256,9 @@ Registration email subjects and plain-text bodies are stored in [registration_em
 
 Quarantine and approved objects use `users/<userID>/files/<fileID>` in their respective buckets. Original filenames, folder relationships, access flags, scan status, hashes, user IDs, and active upload reservations are stored in the cloud PostgreSQL database. IDs, usernames, bcrypt password hashes, email addresses, and assigned plan arrays are stored in `lyrarma-services-users`. A complete backup therefore needs both databases and both S3 buckets
 
-All limit values are positive integers in MiB. Plan limits cannot exceed their corresponding absolute limits, and a plan's file limit cannot exceed its storage quota. When an account has multiple plans, the highest storage limit and the highest upload limit are applied. Invalid names, duplicate plan definitions, unknown JSON properties, missing defaults, and invalid limits stop application startup
+Upload and storage limits accept positive integers in MiB or `-1` for no configured limit; zero and values below `-1` are invalid. Finite plan limits cannot exceed their corresponding finite system limits, and a finite file limit cannot exceed a finite storage quota. When an account has multiple plans, the highest value for each limit wins, with `-1` taking precedence over finite values. Effective limits are then capped by any finite system ceilings, and the effective file limit is also capped by the storage quota. To remove a limit completely, set both the plan field and its corresponding system setting to `-1`. Invalid names, duplicate plan definitions, unknown JSON properties, missing defaults, and invalid limits stop application startup
+
+The limits API returns effective sizes in bytes, with `-1` explicitly representing an unlimited value. The dashboard displays unlimited values as localized text, keeps showing used and reserved storage in GB, and hides the percentage bar when there is no storage quota. Upload reservations still track concurrent uploads for unlimited accounts. Unlimited settings do not remove numeric representation limits, available disk or S3 capacity, request timeouts, scanner limits, or restrictions imposed by a reverse proxy or storage provider; adjust those separately. Fiber's request-body limit uses the platform's largest safely supported request-body size when `MAX_UPLOAD_MB=-1`
 
 ```dotenv
 DEFAULT_USER_PLAN=user
@@ -521,6 +523,8 @@ The `config` package loads and validates one immutable settings snapshot. The `a
 ## Development
 
 Run unit tests with `go test ./...`. PostgreSQL confirmation tests additionally run when `LYRARMA_TEST_USERS_DATABASE_URL` is set to a dedicated test database connection string. They create and remove an isolated temporary schema and require schema creation permissions; they cover concurrent confirmation, expiry, replay prevention and rollback after account creation conflicts
+
+Run dashboard JavaScript regression tests with `node --test web/tests/dashboard.test.cjs` using Node.js 18 or newer. They cover localized unlimited storage, transitions between finite and unlimited plans, and client-side upload checks
 
 Run the server with `go run ./src` during development. To build a binary from the repository root:
 

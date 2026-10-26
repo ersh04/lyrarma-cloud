@@ -63,15 +63,18 @@
   function updateStorageUsage(limits) {
     const meter = getElement("storageUsage");
     if (!meter || ![limits.max_storage_size, limits.used_storage_size, limits.reserved_storage_size].every(Number.isFinite) ||
-        limits.max_storage_size <= 0 || limits.used_storage_size < 0 || limits.reserved_storage_size < 0) {
+        (limits.max_storage_size <= 0 && limits.max_storage_size !== -1) || limits.used_storage_size < 0 || limits.reserved_storage_size < 0) {
       return;
     }
     const used = limits.used_storage_size + limits.reserved_storage_size;
-    const percent = Math.min(100, used / limits.max_storage_size * 100);
+    const unlimited = limits.max_storage_size === -1;
+    const percent = unlimited ? 0 : Math.min(100, used / limits.max_storage_size * 100);
     const usedGB = formatStorageGB(used);
-    const limitGB = formatStorageGB(limits.max_storage_size);
+    const limitGB = unlimited ? translate("unlimited") : formatStorageGB(limits.max_storage_size);
     getElement("storageUsed").textContent = usedGB;
+    getElement("storageOf").textContent = unlimited ? "·" : translate("storageOf");
     getElement("storageLimit").textContent = limitGB;
+    getElement("storageLimitUnit").hidden = unlimited;
     getElement("storageReservedSize").textContent = formatStorageGB(limits.reserved_storage_size);
     getElement("storagePlanName").textContent = Array.isArray(limits.plan) ? limits.plan.join(", ") : "";
     getElement("storageAmounts").hidden = false;
@@ -81,9 +84,15 @@
     getElement("storageFill").style.width = `${percent}%`;
     meter.dataset.state = percent >= 100 ? "full" : percent >= 80 ? "warning" : "normal";
     const progress = getElement("storageProgress");
-    progress.hidden = false;
+    progress.hidden = unlimited;
     progress.setAttribute("aria-valuenow", String(percent));
-    progress.setAttribute("aria-valuetext", `${usedGB} ${translate("sizeGbUnit")} ${translate("storageOf")} ${limitGB} ${translate("sizeGbUnit")}`);
+    progress.setAttribute("aria-valuetext", `${usedGB} ${translate("sizeGbUnit")} ${translate("storageOf")} ${limitGB}${unlimited ? "" : ` ${translate("sizeGbUnit")}`}`);
+    if (Number.isFinite(limits.max_upload_size) && (limits.max_upload_size === -1 || limits.max_upload_size > 0)) {
+      const maxUploadMb = limits.max_upload_size === -1 ? -1 : limits.max_upload_size / (1024 ** 2);
+      dashboardRoot.dataset.maxUploadMb = String(maxUploadMb);
+      getElement("uploadLimit").textContent = maxUploadMb === -1 ? translate("unlimited") : String(maxUploadMb);
+      getElement("uploadLimitUnit").hidden = maxUploadMb === -1;
+    }
   }
 
   async function refreshStorageUsage() {
@@ -445,9 +454,6 @@
     }
     form.dataset.uploadBound = "true";
 
-    const maxUploadMb = Number(dashboardRoot.dataset.maxUploadMb || "1024");
-    const maxUploadBytes = Math.max(1, maxUploadMb) * 1024 * 1024;
-
     fileInput.addEventListener("change", () => {
       const selectedFiles = uniqueFiles(Array.from(fileInput.files || []));
       if (selectedFiles.length > 0) {
@@ -491,6 +497,8 @@
         return;
       }
 
+      const maxUploadMb = Number(dashboardRoot.dataset.maxUploadMb || "1024");
+      const maxUploadBytes = maxUploadMb === -1 ? Infinity : Math.max(1, maxUploadMb) * 1024 * 1024;
       for (const selectedFile of selectedFiles) {
         if (selectedFile.size > maxUploadBytes) {
           progressWrap.hidden = false;
@@ -629,7 +637,7 @@
 
         if (errorMessage.startsWith("limit:")) {
           const fileName = errorMessage.slice("limit:".length);
-          progressLbl.textContent = translate("uploadRejected", { name: fileName, limit: maxUploadMb });
+          progressLbl.textContent = translate(maxUploadMb === -1 ? "uploadRejectedNoLimit" : "uploadRejected", { name: fileName, limit: maxUploadMb });
         } else if (errorMessage === "network") {
           progressLbl.textContent = translate("networkError");
         } else {

@@ -17,11 +17,17 @@ type dashboardLimits struct {
 }
 
 func storageContext(limits *dashboardLimits, language string) map[string]any {
-	if limits == nil || limits.MaxStorageSize <= 0 || limits.UsedStorageSize < 0 || limits.ReservedStorageSize < 0 {
+	if limits == nil || (limits.MaxStorageSize <= 0 && limits.MaxStorageSize != -1) || limits.UsedStorageSize < 0 || limits.ReservedStorageSize < 0 {
 		return map[string]any{"available": false, "percent": "0", "state": "normal"}
 	}
 	used := float64(limits.UsedStorageSize) + float64(limits.ReservedStorageSize)
-	percent := math.Min(100, used/float64(limits.MaxStorageSize)*100)
+	unlimited := limits.MaxStorageSize == -1
+	percent := 0.0
+	limitGB := ""
+	if !unlimited {
+		percent = math.Min(100, used/float64(limits.MaxStorageSize)*100)
+		limitGB = formatStorageGB(float64(limits.MaxStorageSize), language)
+	}
 	state := "normal"
 	if percent >= 100 {
 		state = "full"
@@ -30,8 +36,9 @@ func storageContext(limits *dashboardLimits, language string) map[string]any {
 	}
 	return map[string]any{
 		"available":    true,
+		"unlimited":    unlimited,
 		"used_gb":      formatStorageGB(used, language),
-		"limit_gb":     formatStorageGB(float64(limits.MaxStorageSize), language),
+		"limit_gb":     limitGB,
 		"reserved_gb":  formatStorageGB(float64(limits.ReservedStorageSize), language),
 		"has_reserved": limits.ReservedStorageSize > 0,
 		"percent":      fmt.Sprintf("%.2f", percent),

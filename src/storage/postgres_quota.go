@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -48,11 +49,23 @@ func (s *SQLStore) ReserveUpload(
 	size int64,
 	maxStorageBytes int64,
 ) error {
+	return reserveUpload(ctx, s.db.Begin, userID, reservationID, size, maxStorageBytes)
+}
+
+func reserveUpload(
+	ctx context.Context,
+	begin func(context.Context) (pgx.Tx, error),
+	userID, reservationID string,
+	size, maxStorageBytes int64,
+) error {
+	if maxStorageBytes == -1 {
+		maxStorageBytes = math.MaxInt64
+	}
 	if size < 0 || maxStorageBytes <= 0 || size > maxStorageBytes {
 		return ErrStorageQuotaExceeded
 	}
 
-	tx, err := s.db.Begin(ctx)
+	tx, err := begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin quota reservation: %w", err)
 	}

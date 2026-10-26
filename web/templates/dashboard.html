@@ -34,6 +34,8 @@
   data-access="{{ t('access') }}"
   data-size-gb-unit="{{ t('size_gb_unit') }}"
   data-storage-of="{{ t('storage_of') }}"
+  data-unlimited="{{ t('unlimited') }}"
+  data-upload-rejected-no-limit="{{ t('upload_rejected_no_limit') }}"
 >
 
   {# ── Top bar ─────────────────────────────────────────────────────── #}
@@ -50,10 +52,10 @@
     <div class="storage-meter__header">
       <h2 class="section-title" id="storageUsageTitle">{{ t('storage_title') }}</h2>
       <p class="storage-meter__amounts" id="storageAmounts" {% if not storage.available %}hidden{% endif %}>
-        <span id="storageUsed">{{ storage.used_gb }}</span> {{ t('size_gb_unit') }} {{ t('storage_of') }} <span id="storageLimit">{{ storage.limit_gb }}</span> {{ t('size_gb_unit') }}
+        <span id="storageUsed">{{ storage.used_gb }}</span> {{ t('size_gb_unit') }} <span id="storageOf">{% if storage.unlimited %}·{% else %}{{ t('storage_of') }}{% endif %}</span> <span id="storageLimit">{% if storage.unlimited %}{{ t('unlimited') }}{% else %}{{ storage.limit_gb }}{% endif %}</span><span id="storageLimitUnit" {% if storage.unlimited %}hidden{% endif %}> {{ t('size_gb_unit') }}</span>
       </p>
     </div>
-    <div class="storage-meter__track" id="storageProgress" role="progressbar" aria-labelledby="storageUsageTitle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ storage.percent }}" aria-valuetext="{{ storage.used_gb }} {{ t('size_gb_unit') }} {{ t('storage_of') }} {{ storage.limit_gb }} {{ t('size_gb_unit') }}" {% if not storage.available %}hidden{% endif %}>
+    <div class="storage-meter__track" id="storageProgress" role="progressbar" aria-labelledby="storageUsageTitle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ storage.percent }}" aria-valuetext="{{ storage.used_gb }} {{ t('size_gb_unit') }} {{ t('storage_of') }} {% if storage.unlimited %}{{ t('unlimited') }}{% else %}{{ storage.limit_gb }} {{ t('size_gb_unit') }}{% endif %}" {% if not storage.available or storage.unlimited %}hidden{% endif %}>
       <div class="storage-meter__fill" id="storageFill" style="width: {{ storage.percent }}%"></div>
     </div>
     <p class="storage-meter__detail" id="storagePlan" {% if not storage.available %}hidden{% endif %}>{{ t('storage_plan') }}: <span id="storagePlanName">{{ storage.plan }}</span></p>
@@ -172,7 +174,7 @@
       {# ── File upload form ───────────────────────────────────────────── #}
       <div class="card upload-card">
       <h2 class="upload-card__title">{{ t("upload_title") }}</h2>
-      <p class="form__hint">{{ t("max_file_size") }} {{ max_upload_mb }} {{ t("size_mb_unit") }}</p>
+      <p class="form__hint">{{ t("max_file_size") }} <span id="uploadLimit">{% if max_upload_mb == -1 %}{{ t('unlimited') }}{% else %}{{ max_upload_mb }}{% endif %}</span><span id="uploadLimitUnit" {% if max_upload_mb == -1 %}hidden{% endif %}> {{ t("size_mb_unit") }}</span></p>
 
       <form
         method="post"

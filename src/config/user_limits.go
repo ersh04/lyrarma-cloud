@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"math"
 	"sort"
 )
 
@@ -44,41 +43,31 @@ type UserLimits struct {
 
 // NewUserLimits creates validated limits for one service plan
 func NewUserLimits(maxStorageBytes, maxFileBytes int64) (UserLimits, error) {
-	if maxStorageBytes <= 0 {
-		return UserLimits{}, fmt.Errorf("storage limit must be positive")
+	if maxStorageBytes <= 0 && maxStorageBytes != -1 {
+		return UserLimits{}, fmt.Errorf("storage limit must be positive or -1")
 	}
-	if maxFileBytes <= 0 {
-		return UserLimits{}, fmt.Errorf("file limit must be positive")
+	if maxFileBytes <= 0 && maxFileBytes != -1 {
+		return UserLimits{}, fmt.Errorf("file limit must be positive or -1")
 	}
-	if maxFileBytes > maxStorageBytes {
+	if maxStorageBytes != -1 && maxFileBytes > maxStorageBytes {
 		return UserLimits{}, fmt.Errorf("file limit cannot exceed storage limit")
 	}
 	return UserLimits{maxStorageBytes: maxStorageBytes, maxFileBytes: maxFileBytes}, nil
 }
 
-// MaxStorageBytes returns the maximum storage allowed by the service plan, or math.MaxInt64 if the limit is -1
+// MaxStorageBytes возвращает квоту хранилища в байтах или -1 при отсутствии ограничения
 func (l UserLimits) MaxStorageBytes() int64 {
-	var maxStorageBytes int64 = l.maxStorageBytes
-
-	if maxStorageBytes == -1 {
-		return math.MaxInt64
-	}
-	return maxStorageBytes
+	return l.maxStorageBytes
 }
 
-// MaxFileBytes returns the maximum file size allowed by the service plan, or math.MaxInt64 if the limit is -1
+// MaxFileBytes возвращает максимальный размер файла в байтах или -1 при отсутствии ограничения
 func (l UserLimits) MaxFileBytes() int64 {
-	var maxFileBytes int64 = l.maxFileBytes
-
-	if maxFileBytes == -1 {
-		return math.MaxInt64
-	}
-	return maxFileBytes
+	return l.maxFileBytes
 }
 
 // AllowsFile reports whether a file size fits the service plan limit
 func (l UserLimits) AllowsFile(size int64) bool {
-	return size >= 0 && size <= l.maxFileBytes
+	return size >= 0 && (l.maxFileBytes == -1 || size <= l.maxFileBytes)
 }
 
 // UserLimitSet stores immutable system limits and a dynamic service plan catalog
@@ -96,14 +85,14 @@ func NewUserLimitSet(
 	defaultPlan string,
 	plans map[string]UserLimits,
 ) (UserLimitSet, error) {
-	if hardMaxStorageBytes <= 0 || hardMaxFileBytes <= 0 {
-		return UserLimitSet{}, fmt.Errorf("system limits must be positive")
+	if (hardMaxStorageBytes <= 0 && hardMaxStorageBytes != -1) || (hardMaxFileBytes <= 0 && hardMaxFileBytes != -1) {
+		return UserLimitSet{}, fmt.Errorf("system limits must be positive or -1")
 	}
-	if hardMaxFileBytes > hardMaxStorageBytes {
+	if hardMaxStorageBytes != -1 && hardMaxFileBytes > hardMaxStorageBytes {
 		return UserLimitSet{}, fmt.Errorf("system file limit cannot exceed storage limit")
 	}
 	maxInt := int64(^uint(0) >> 1)
-	if hardMaxFileBytes > maxInt-multipartOverheadBytes {
+	if hardMaxFileBytes > maxInt-multipartOverheadBytes-1 {
 		return UserLimitSet{}, fmt.Errorf("system file limit is too large for the HTTP server")
 	}
 
@@ -121,13 +110,13 @@ func NewUserLimitSet(
 		if err != nil {
 			return UserLimitSet{}, err
 		}
-		if limits.maxStorageBytes <= 0 || limits.maxFileBytes <= 0 {
+		if (limits.maxStorageBytes <= 0 && limits.maxStorageBytes != -1) || (limits.maxFileBytes <= 0 && limits.maxFileBytes != -1) {
 			return UserLimitSet{}, fmt.Errorf("limits for service plan %q are not configured", name)
 		}
-		if limits.maxStorageBytes > hardMaxStorageBytes {
+		if hardMaxStorageBytes != -1 && limits.maxStorageBytes > hardMaxStorageBytes {
 			return UserLimitSet{}, fmt.Errorf("storage limit for service plan %q exceeds the system limit", name)
 		}
-		if limits.maxFileBytes > hardMaxFileBytes {
+		if hardMaxFileBytes != -1 && limits.maxFileBytes > hardMaxFileBytes {
 			return UserLimitSet{}, fmt.Errorf("file limit for service plan %q exceeds the system limit", name)
 		}
 		copiedPlans[name] = limits
@@ -154,7 +143,7 @@ func (s UserLimitSet) For(plan string) (UserLimits, error) {
 	if !exists {
 		return UserLimits{}, fmt.Errorf("service plan %q is not configured", plan)
 	}
-	return limits, nil
+	return s.effectiveLimits(limits), nil
 }
 
 // ForPlans combines assigned plans by taking the highest value for each limit
@@ -171,18 +160,39 @@ func (s UserLimitSet) ForPlans(plans []string) (UserLimits, error) {
 		}
 		seen[plan] = struct{}{}
 
-		limits, err := s.For(plan)
+		name, err := ParsePlanName(plan)
 		if err != nil {
 			return UserLimits{}, err
 		}
-		if limits.maxStorageBytes > combined.maxStorageBytes {
+		limits, exists := s.plans[name]
+		if !exists {
+			return UserLimits{}, fmt.Errorf("service plan %q is not configured", name)
+		}
+		if limits.maxStorageBytes == -1 || (combined.maxStorageBytes != -1 && limits.maxStorageBytes > combined.maxStorageBytes) {
 			combined.maxStorageBytes = limits.maxStorageBytes
 		}
-		if limits.maxFileBytes > combined.maxFileBytes {
+		if limits.maxFileBytes == -1 || (combined.maxFileBytes != -1 && limits.maxFileBytes > combined.maxFileBytes) {
 			combined.maxFileBytes = limits.maxFileBytes
 		}
 	}
-	return combined, nil
+	return s.effectiveLimits(combined), nil
+}
+
+func (s UserLimitSet) effectiveLimits(limits UserLimits) UserLimits {
+	limits.maxStorageBytes = minimumLimit(limits.maxStorageBytes, s.hardMaxStorageBytes)
+	limits.maxFileBytes = minimumLimit(limits.maxFileBytes, s.hardMaxFileBytes)
+	limits.maxFileBytes = minimumLimit(limits.maxFileBytes, limits.maxStorageBytes)
+	return limits
+}
+
+func minimumLimit(first, second int64) int64 {
+	if first == -1 {
+		return second
+	}
+	if second == -1 || first < second {
+		return first
+	}
+	return second
 }
 
 // DefaultPlan returns the plan assigned to newly registered users
@@ -203,7 +213,11 @@ func (s UserLimitSet) PlanNames() []string {
 func (s UserLimitSet) HardMaxStorageBytes() int64 { return s.hardMaxStorageBytes }
 func (s UserLimitSet) HardMaxFileBytes() int64    { return s.hardMaxFileBytes }
 
-// RequestBodyLimit returns a safe Fiber multipart request limit
+// RequestBodyLimit возвращает безопасный лимит тела multipart-запроса для Fiber
 func (s UserLimitSet) RequestBodyLimit() int {
+	if s.hardMaxFileBytes == -1 {
+		// Оставляем запас для дополнительного байта при проверке размера multipart-запроса
+		return int(^uint(0)>>1) - 1
+	}
 	return int(s.hardMaxFileBytes + multipartOverheadBytes)
 }

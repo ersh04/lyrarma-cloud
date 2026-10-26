@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +33,93 @@ func TestLoadBuildsValidatedImmutableLimits(t *testing.T) {
 	}
 	if cfg.UsersDatabaseURL() != "postgres://localhost/lyrarma-services-users" {
 		t.Fatalf("unexpected users database URL: %q", cfg.UsersDatabaseURL())
+	}
+}
+
+func TestLoadUnlimitedLimitValidation(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		hardStorage string
+		hardUpload  string
+		storage     int64
+		upload      int64
+		wantStorage int64
+		wantUpload  int64
+		wantError   bool
+	}{
+		{name: "unlimited plan", hardStorage: "1000", hardUpload: "20", storage: -1, upload: -1, wantStorage: 1000, wantUpload: 20},
+		{name: "unlimited plan storage", hardStorage: "1000", hardUpload: "20", storage: -1, upload: 5, wantStorage: 1000, wantUpload: 5},
+		{name: "unlimited plan upload", hardStorage: "1000", hardUpload: "20", storage: 100, upload: -1, wantStorage: 100, wantUpload: 20},
+		{name: "unlimited system", hardStorage: "-1", hardUpload: "-1", storage: 100, upload: 5, wantStorage: 100, wantUpload: 5},
+		{name: "all unlimited", hardStorage: "-1", hardUpload: "-1", storage: -1, upload: -1, wantStorage: -1, wantUpload: -1},
+		{name: "upload capped by storage", hardStorage: "-1", hardUpload: "-1", storage: 100, upload: -1, wantStorage: 100, wantUpload: 100},
+		{name: "unlimited system storage", hardStorage: "-1", hardUpload: "20", storage: 2000, upload: 5, wantStorage: 2000, wantUpload: 5},
+		{name: "unlimited system upload", hardStorage: "1000", hardUpload: "-1", storage: 100, upload: 50, wantStorage: 100, wantUpload: 50},
+		{name: "zero storage", hardStorage: "1000", hardUpload: "20", upload: 5, wantError: true},
+		{name: "negative storage", hardStorage: "1000", hardUpload: "20", storage: -2, upload: 5, wantError: true},
+		{name: "zero upload", hardStorage: "1000", hardUpload: "20", storage: -1, wantError: true},
+		{name: "negative upload", hardStorage: "1000", hardUpload: "20", storage: -1, upload: -2, wantError: true},
+		{name: "storage exceeds system", hardStorage: "1000", hardUpload: "20", storage: 2000, upload: -1, wantError: true},
+		{name: "upload exceeds system", hardStorage: "1000", hardUpload: "20", storage: -1, upload: 21, wantError: true},
+		{name: "zero system storage", hardStorage: "0", hardUpload: "20", storage: -1, upload: -1, wantError: true},
+		{name: "negative system storage", hardStorage: "-2", hardUpload: "20", storage: -1, upload: -1, wantError: true},
+		{name: "zero system upload", hardStorage: "1000", hardUpload: "0", storage: -1, upload: -1, wantError: true},
+		{name: "negative system upload", hardStorage: "1000", hardUpload: "-2", storage: -1, upload: -1, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(hardMaxStorageMBEnv, test.hardStorage)
+			t.Setenv(hardMaxUploadMBEnv, test.hardUpload)
+			plans, err := json.Marshal([]planJSONConfig{{Name: "user", MaxStorageMB: test.storage, MaxUploadMB: test.upload}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(userPlansJSONEnv, string(plans))
+			cfg, err := Load()
+			if test.wantError {
+				if err == nil {
+					t.Fatal("expected a limit validation error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			limits, err := cfg.UserLimits().For("user")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStorage, wantUpload := test.wantStorage*mebibyte, test.wantUpload*mebibyte
+			if test.wantStorage == -1 {
+				wantStorage = -1
+			}
+			if test.wantUpload == -1 {
+				wantUpload = -1
+			}
+			if limits.MaxStorageBytes() != wantStorage || limits.MaxFileBytes() != wantUpload {
+				t.Fatalf("unexpected plan limits: storage=%d file=%d", limits.MaxStorageBytes(), limits.MaxFileBytes())
+			}
+		})
+	}
+}
+
+func TestMebibytesOrMaxValue(t *testing.T) {
+	for _, test := range []struct {
+		value     int64
+		want      int64
+		wantError bool
+	}{
+		{value: -1, want: -1},
+		{value: 1, want: mebibyte},
+		{value: math.MaxInt64 / mebibyte, want: (math.MaxInt64 / mebibyte) * mebibyte},
+		{value: 0, wantError: true},
+		{value: -2, wantError: true},
+		{value: math.MaxInt64, wantError: true},
+	} {
+		got, err := mebibytesOrMaxValue(test.value, "limit")
+		if (err != nil) != test.wantError || (!test.wantError && got != test.want) {
+			t.Errorf("mebibytesOrMaxValue(%d) = %d, %v; want %d, error=%t", test.value, got, err, test.want, test.wantError)
+		}
 	}
 }
 

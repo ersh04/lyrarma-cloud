@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"fmt"
 	"io"
 	"math"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ func TestStorageContext(t *testing.T) {
 		percent   string
 		state     string
 		available bool
+		unlimited bool
 	}{
 		{name: "empty", limit: 10 * gb, percent: "0.00", state: "normal", available: true},
 		{name: "includes reservations", used: 2 * gb, reserved: gb, limit: 10 * gb, percent: "30.00", state: "normal", available: true},
@@ -30,7 +32,9 @@ func TestStorageContext(t *testing.T) {
 		{name: "full", used: 10 * gb, limit: 10 * gb, percent: "100.00", state: "full", available: true},
 		{name: "downgraded plan", used: 12 * gb, limit: 10 * gb, percent: "100.00", state: "full", available: true},
 		{name: "no integer overflow", used: math.MaxInt64, reserved: math.MaxInt64, limit: math.MaxInt64, percent: "100.00", state: "full", available: true},
+		{name: "unlimited", used: 20 * gb, reserved: gb, limit: -1, percent: "0.00", state: "normal", available: true, unlimited: true},
 		{name: "invalid limit"},
+		{name: "invalid negative limit", limit: -2},
 		{name: "invalid usage", used: -1, limit: gb},
 		{name: "invalid reservation", reserved: -1, limit: gb},
 	} {
@@ -44,6 +48,9 @@ func TestStorageContext(t *testing.T) {
 			}
 			if test.available && (result["percent"] != test.percent || result["state"] != test.state || result["plan"] != "user, premium") {
 				t.Errorf("unexpected quota display: %v", result)
+			}
+			if test.available && result["unlimited"] != test.unlimited {
+				t.Errorf("unexpected unlimited state: %v", result)
 			}
 		})
 	}
@@ -72,11 +79,18 @@ func TestFormatStorageGB(t *testing.T) {
 
 func TestDashboardStorageUsage(t *testing.T) {
 	const gb = int64(1024 * 1024 * 1024)
-	for _, language := range []string{"ru", "en"} {
-		t.Run(language, func(t *testing.T) {
+	for _, variant := range []struct {
+		language  string
+		unlimited bool
+	}{{"ru", false}, {"en", false}, {"ru", true}, {"en", true}} {
+		language := variant.language
+		t.Run(fmt.Sprintf("%s/unlimited=%t", language, variant.unlimited), func(t *testing.T) {
 			limits := dashboardLimits{
 				Plan: []string{"premium"}, MaxUploadSize: gb, MaxStorageSize: 10 * gb,
 				UsedStorageSize: 4 * gb, ReservedStorageSize: gb / 4,
+			}
+			if variant.unlimited {
+				limits.MaxUploadSize, limits.MaxStorageSize = -1, -1
 			}
 			app := fiber.New()
 			app.Get("/api/files", func(c fiber.Ctx) error {
@@ -130,14 +144,34 @@ func TestDashboardStorageUsage(t *testing.T) {
 			if progress == nil {
 				t.Fatal("storage progress bar not rendered")
 			}
-			if value, _ := elementAttribute(progress, "aria-valuenow"); value != "42.50" {
+			wantPercent := "42.50"
+			if variant.unlimited {
+				wantPercent = "0.00"
+			}
+			if value, _ := elementAttribute(progress, "aria-valuenow"); value != wantPercent {
 				t.Errorf("usage must include global files and reservations, got %q", value)
 			}
 			wantText := "4.25 GB of 10.00 GB"
 			if language == "ru" {
 				wantText = "4,25 ГБ из 10,00 ГБ"
 			}
-			if text, _ := elementAttribute(progress, "aria-valuetext"); text != wantText {
+			if variant.unlimited {
+				unlimited := "Unlimited"
+				if language == "ru" {
+					unlimited = "Без ограничений"
+				}
+				if _, hidden := elementAttribute(progress, "hidden"); !hidden {
+					t.Error("unlimited storage must not display a percentage bar")
+				}
+				for _, id := range []string{"storageLimit", "uploadLimit"} {
+					if !strings.Contains(string(body), `<span id="`+id+`">`+unlimited+`</span>`) {
+						t.Errorf("missing localized unlimited label: %s", id)
+					}
+				}
+				if !strings.Contains(string(body), `data-max-upload-mb="-1"`) {
+					t.Error("unlimited upload sentinel lost during rendering")
+				}
+			} else if text, _ := elementAttribute(progress, "aria-valuetext"); text != wantText {
 				t.Errorf("unexpected localized amounts: %q, want %q", text, wantText)
 			}
 			for _, authenticated := range []bool{false, true} {

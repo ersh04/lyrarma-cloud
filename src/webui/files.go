@@ -53,7 +53,7 @@ func (h *Handler) dashboard(c fiber.Ctx) error {
 		return h.expireSession(c)
 	} else if limitsResponse.status == fiber.StatusOK {
 		var limits dashboardLimits
-		if json.Unmarshal(limitsResponse.body, &limits) == nil && limits.MaxUploadSize > 0 {
+		if json.Unmarshal(limitsResponse.body, &limits) == nil && (limits.MaxUploadSize > 0 || limits.MaxUploadSize == -1) {
 			maxUploadSize = limits.MaxUploadSize
 			storageLimits = &limits
 		} else {
@@ -118,6 +118,10 @@ func (h *Handler) renderDashboard(
 		fileItems = append(fileItems, fileContext(file))
 	}
 
+	maxUploadMB := maxUploadSize / (1024 * 1024)
+	if maxUploadSize == -1 {
+		maxUploadMB = -1
+	}
 	return h.render(c, "dashboard.html", pongo2.Context{
 		"files":               fileItems,
 		"folders":             allFolders,
@@ -130,7 +134,7 @@ func (h *Handler) renderDashboard(
 		"notice":              h.dashboardNotice(c),
 		"files_word":          h.countWord(h.requestLanguage(c), len(files), "file"),
 		"folders_word":        h.countWord(h.requestLanguage(c), len(folders), "folder"),
-		"max_upload_mb":       maxUploadSize / (1024 * 1024),
+		"max_upload_mb":       maxUploadMB,
 		"storage":             storageContext(storageLimits, h.requestLanguage(c)),
 	}, fiber.StatusOK)
 }
