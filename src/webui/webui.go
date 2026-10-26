@@ -92,6 +92,7 @@ func (h *Handler) registerRoutes() {
 	h.api.Post("/login", h.login)
 	h.api.Get("/register", h.registerPage)
 	h.api.Post("/register", h.register)
+	h.api.Get("/confirm-registration", h.confirmRegistration)
 	h.api.Get("/privacy-policy", h.privacyPolicy)
 	h.api.Get("/lyrarma-id/policy", h.idPolicy)
 	h.api.Get("/logout", h.requireSession, h.logout)

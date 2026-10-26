@@ -106,6 +106,9 @@ func (a *API) registerRoutes(cfg config.Config, logger *slog.Logger) {
 		jwtConfig,
 		cfg.BetaTestKey(),
 		limits.DefaultPlan(),
+		cfg.PostControllerURL(),
+		cfg.PostControllerToken(),
+		cfg.RegistrationConfirmationURL(),
 		logger,
 	)
 	fileHandler := handlers.NewFileHandler(a.store, a.userStore, a.s3Store, limits, logger)
@@ -123,6 +126,7 @@ func (a *API) registerRoutes(cfg config.Config, logger *slog.Logger) {
 
 	// Authentication routes
 	api.Post("/auth/register", authHandler.Register)
+	api.Get("/auth/confirm-registration", authHandler.ConfirmRegistration)
 	api.Post("/auth/login", authHandler.Login)
 
 	// File management routes

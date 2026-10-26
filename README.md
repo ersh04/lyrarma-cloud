@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/release-v3.2.x-lightgrey.svg" alt=""></a>
+  <a href="#"><img src="https://img.shields.io/badge/release-v3.3.x-lightgrey.svg" alt=""></a>
   <a href="#"><img src="https://img.shields.io/badge/Go-v1.26.5-blue.svg" alt="Go"></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs"></a>
@@ -177,6 +177,10 @@ docker compose -f compose.users_db.yaml up -d --wait
 
 The cloud database binds to `127.0.0.1:5432`. The dedicated `lyrarma-services-users` database binds to `127.0.0.1:5433`. Each service uses its own named volume. On startup, the application creates or migrates cloud metadata tables in the first database and creates the authentication `users` table in the second database with exactly `id`, `username`, `password`, `email`, and `plan` columns. The `password` column contains a bcrypt hash, never plaintext, and `plan` is a non-empty PostgreSQL `TEXT[]` array. The cloud `users` table contains only `id` and `created_at`, so `id` is the sole value duplicated between the two user tables
 
+The users database also contains `registration_requests`, separate from active accounts. Registration stores the username, email, bcrypt password hash, initial plan, SHA-256 confirmation-key hash, creation time and expiry time there, without creating an authentication user or cloud profile. Requests expire after 24 hours; expired rows are removed at application startup and when a successful registration transaction creates another request. Active requests reserve their username and email until expiry. The 256-bit random confirmation key is URL-safe, is not returned by the API or written to logs, and is only available in memory during registration. The sender submits a confirmation email to the configured post controller; a registration response is not proof of email delivery. Confirmation matches the key hash, checks expiry using the database clock and atomically consumes the request and creates the authentication account. Expired requests are deleted without creating an account; invalid or already used keys return `404`. Concurrent uses of one key cannot create multiple accounts
+
+After confirmation, the server initializes the cloud profile and issues a JWT using the normal session lifetime. The browser route `/confirm-registration?key=<key>` sets the configured authentication cookies and redirects to `/dashboard`. Confirmation responses are marked `no-store` and use `Referrer-Policy: no-referrer`; configure reverse-proxy access logs to omit or redact confirmation query strings. The authentication and cloud databases do not share a transaction: if cloud profile initialization fails after the account is committed, the account remains confirmed and a later normal login retries initialization. The browser displays a localized message asking the user to sign in later rather than consuming the key again
+
 Existing installations must first copy their account names and bcrypt hashes from the legacy cloud `users.password_hash` column into `lyrarma-services-users`, supplying a real email for every account. During startup, the application matches legacy records by username, copies each existing cloud ID into the authentication table, moves the existing cloud plan into the authentication plan array, verifies every cloud profile has an authentication account, and then removes `username`, `password_hash`, and `plan` from the cloud table. Accounts without an existing plan receive `DEFAULT_USER_PLAN`. If a matching authentication account is missing or a plan is not configured, startup stops before the legacy columns are removed
 
 For existing PostgreSQL servers, skip this step and set `DATABASE_URL` and `USERS_DATABASE_URL` to their respective connection strings
@@ -232,6 +236,9 @@ Settings are loaded in this order:
 | `JWT_SECRET` | Required | Secret used to sign and verify authentication tokens. It must contain at least 32 bytes and must not equal the template value |
 | `BETA_TEST_KEY` | Unset | When non-empty, requires a registration key in both the web form and JSON API, must contain at least 16 bytes, and must differ from the template value. An unset or empty value hides the beta-key field and allows registration without it |
 | `JWT_TTL` | `24h` | Lifetime of issued JWTs and browser authentication cookies |
+| `POST_CONTROLLER_BASE_URL` | Unset | Optional base URL for the post controller, available through `Config.PostControllerBaseURL()` and `Config.PostControllerURL()` |
+| `POST_CONTROLLER_TOKEN` | Unset | Optional post controller authentication token, available through `Config.PostControllerToken()`; keep it secret |
+| `REGISTRATION_CONFIRMATION_URL` | Unset | Absolute HTTP(S) confirmation page URL without the registration key; the sender adds the URL-encoded `key` query parameter. Required to prepare confirmation emails |
 | `MAX_UPLOAD_MB` | Required | Absolute file-size ceiling in MiB. To allow files up to this ceiling, configure the reverse proxy request-body limit at least 1 MiB higher for multipart overhead; use a lower proxy limit only intentionally |
 | `MAX_STORAGE_MB` | Required | Absolute per-user storage ceiling in MiB |
 | `DEFAULT_USER_PLAN` | Required | Name placed in the initial plan list for new users and legacy accounts without a plan during migration |
@@ -244,6 +251,8 @@ Settings are loaded in this order:
 | `AWS_SECRET_ACCESS_KEY` | Unset | Secret paired with the access key. If both keys are absent, the client uses the AWS SDK's default credential chain |
 | `S3_USE_PATH_STYLE` | `true` | Use path-style S3 addressing. Accepts `true` or `false` |
 | `DATA_DIR` | `./data` | Retained in the configuration, but the current implementation stores file contents in S3. Setting this does not enable local file storage |
+
+Registration email subjects and plain-text bodies are stored in [registration_email.json](src/handlers/registration_email.json) with English and Russian translations and a `{confirmation_url}` placeholder. The JSON file is embedded in the server binary, so rebuild after changing it. Emails use the selected web interface language; direct API requests use `Accept-Language`, defaulting to English for unsupported or missing preferences
 
 Quarantine and approved objects use `users/<userID>/files/<fileID>` in their respective buckets. Original filenames, folder relationships, access flags, scan status, hashes, user IDs, and active upload reservations are stored in the cloud PostgreSQL database. IDs, usernames, bcrypt password hashes, email addresses, and assigned plan arrays are stored in `lyrarma-services-users`. A complete backup therefore needs both databases and both S3 buckets
 
@@ -365,7 +374,7 @@ Verify the installed model or run adapter tests with
 The dashboard storage meter shows the occupied space and effective plan limit across all folders, including space reserved by uploads in progress. Values are displayed in GB using 1024³ bytes per GB to match the MiB-based plan configuration, refresh after file or folder deletion, and update every 10 seconds while the page is visible
 
 1. Open `/register`, choose a username, email, and password, read and separately accept both policies, and enter `BETA_TEST_KEY` if the server has configured one. With `BETA_TEST_KEY=""`, the field is hidden and no key is required. The API checks a minimum username length of 3 bytes, a valid email address, and password length of 8 bytes
-2. Sign in at `/login` to open `/dashboard`
+2. Open the confirmation link from the email within 24 hours. A successful confirmation signs you in and opens `/dashboard`. Each link can be used only once; after expiry, register again. Existing account holders can sign in at `/login`
 3. Create folders and open the folder where you want to upload files. Select files or drop them into the upload area
 4. Wait for scanning to complete, then download approved files from the dashboard or enable public access to share them
 5. Share `/shared-file/<fileID>` for a file or `/shared-folder/<folderID>` for a folder. Visitors can download public content without signing in
@@ -381,7 +390,7 @@ Both policies are publicly accessible without signing in and use the current int
 | Lyrarma Cloud Privacy Policy | `/privacy-policy` | [privacy.html](web/templates/legal/en/privacy.html) | [privacy.html](web/templates/legal/ru/privacy.html) |
 | Lyrarma ID System Policy | `/lyrarma-id/policy` | [id.html](web/templates/legal/en/id.html) | [id.html](web/templates/legal/ru/id.html) |
 
-Registration has two separate required checkboxes, initially unchecked, linking to the documents in new tabs. Acceptance is checked by the web handler and independently by the JSON API before account creation. API clients must send the JSON booleans `privacy_policy_accepted: true` and `id_policy_accepted: true`; missing, `null`, or `false` values do not count as acceptance, and strings are rejected. These checks apply to new registrations and do not sign out existing users
+Registration has two separate required checkboxes, initially unchecked, linking to the documents in new tabs. Acceptance is checked by the web handler and independently by the JSON API before creating a pending registration request. API clients must send the JSON booleans `privacy_policy_accepted: true` and `id_policy_accepted: true`; missing, `null`, or `false` values do not count as acceptance, and strings are rejected. These checks apply to new registrations and do not sign out existing users
 
 The current implementation validates acceptance at registration but does not persist a separate acceptance audit record, policy revision, timestamp or IP address. If your deployment needs proof of acceptance, add an appropriate retention-limited audit mechanism before launch
 
@@ -404,7 +413,8 @@ The browser interface manages its session cookie separately. For direct API call
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | HTTP server health response |
-| `POST` | `/api/auth/register` | No | Register with JSON `username`, `email`, `password`, `privacy_policy_accepted: true`, and `id_policy_accepted: true`; `beta_key` is required only when the server's `BETA_TEST_KEY` is non-empty |
+| `POST` | `/api/auth/register` | No | Create a 24-hour pending registration with JSON `username`, `email`, `password`, `privacy_policy_accepted: true`, and `id_policy_accepted: true`; `beta_key` is required only when the server's `BETA_TEST_KEY` is non-empty; returns `201`, not an active account or confirmation key |
+| `GET` | `/api/auth/confirm-registration?key=<key>` | No | Confirm a pending registration and return `username`, `token`, and `expires_at`; invalid, expired or used keys return `404`, identity conflicts return `409`, and session initialization failure after confirmation returns `503` |
 | `POST` | `/api/auth/login` | No | Sign in with JSON `username` and `password`; returns `token` and `expires_at` |
 | `GET` | `/api/files?folder_id=root` | Bearer token | List files in one folder; omitted `folder_id` means `root` |
 | `POST` | `/api/files/upload?folder_id=root` | Bearer token | Upload one multipart form field named `file` to quarantine and return status `uploading` |
@@ -509,6 +519,8 @@ Common statuses include `201` for creation, `400` for invalid input, `401` for a
 The `config` package loads and validates one immutable settings snapshot. The `api` package registers routes, `handlers` implements request handling, `scanner` runs background content checks, and `storage` handles PostgreSQL metadata, quota reservations, and S3 objects. The `webui` package renders browser pages and delegates operations to the API
 
 ## Development
+
+Run unit tests with `go test ./...`. PostgreSQL confirmation tests additionally run when `LYRARMA_TEST_USERS_DATABASE_URL` is set to a dedicated test database connection string. They create and remove an isolated temporary schema and require schema creation permissions; they cover concurrent confirmation, expiry, replay prevention and rollback after account creation conflicts
 
 Run the server with `go run ./src` during development. To build a binary from the repository root:
 

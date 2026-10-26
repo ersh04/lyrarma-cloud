@@ -1,0 +1,10 @@
+{
+  "en": {
+    "subject": "Lyrarma ID Registration Confirmation",
+    "text": "Hello!\nTo confirm your registration, please follow this link: {confirmation_url}"
+  },
+  "ru": {
+    "subject": "Подтверждение регистрации Lyrarma ID",
+    "text": "Здравствуйте!\nЧтобы подтвердить регистрацию, перейдите по ссылке: {confirmation_url}"
+  }
+}

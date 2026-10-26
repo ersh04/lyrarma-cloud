@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -55,8 +56,25 @@ func NewUserLimits(maxStorageBytes, maxFileBytes int64) (UserLimits, error) {
 	return UserLimits{maxStorageBytes: maxStorageBytes, maxFileBytes: maxFileBytes}, nil
 }
 
-func (l UserLimits) MaxStorageBytes() int64 { return l.maxStorageBytes }
-func (l UserLimits) MaxFileBytes() int64    { return l.maxFileBytes }
+// MaxStorageBytes returns the maximum storage allowed by the service plan, or math.MaxInt64 if the limit is -1
+func (l UserLimits) MaxStorageBytes() int64 {
+	var maxStorageBytes int64 = l.maxStorageBytes
+
+	if maxStorageBytes == -1 {
+		return math.MaxInt64
+	}
+	return maxStorageBytes
+}
+
+// MaxFileBytes returns the maximum file size allowed by the service plan, or math.MaxInt64 if the limit is -1
+func (l UserLimits) MaxFileBytes() int64 {
+	var maxFileBytes int64 = l.maxFileBytes
+
+	if maxFileBytes == -1 {
+		return math.MaxInt64
+	}
+	return maxFileBytes
+}
 
 // AllowsFile reports whether a file size fits the service plan limit
 func (l UserLimits) AllowsFile(size int64) bool {

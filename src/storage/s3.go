@@ -193,7 +193,7 @@ func (storage *S3Store) deleteFile(ctx context.Context, bucket, key string) erro
 	return nil
 }
 
-// PromoteQuarantineFile переносит проверенный объект в основной бакет
+// PromoteQuarantineFile moves an inspected object to the primary bucket
 func (storage *S3Store) PromoteQuarantineFile(
 	ctx context.Context,
 	quarantineKey, fileKey, contentType string,

@@ -5,16 +5,19 @@ import "time"
 
 // Config contains a fully validated application settings snapshot
 type Config struct {
-	server       ServerConfig
-	web          WebConfig
-	session      SessionConfig
-	storage      StorageConfig
-	jwt          JWTConfig
-	scanner      ScannerConfig
-	databaseURL  string
-	usersDBURL   string
-	betaTestKey  string
-	userLimitSet UserLimitSet
+	server                      ServerConfig
+	web                         WebConfig
+	session                     SessionConfig
+	storage                     StorageConfig
+	jwt                         JWTConfig
+	scanner                     ScannerConfig
+	databaseURL                 string
+	usersDBURL                  string
+	betaTestKey                 string
+	userLimitSet                UserLimitSet
+	postControllerURL           string
+	postControllerToken         string
+	registrationConfirmationURL string
 }
 
 // ServerConfig contains HTTP server settings
@@ -61,22 +64,24 @@ type JWTConfig struct {
 
 // ScannerConfig contains background file scanning settings
 type ScannerConfig struct {
-	enabled           bool
-	workerCount       int
-	pollInterval      time.Duration
-	timeout           time.Duration
-	fileCommand       string
-	antivirusCommand  string
-	imageCommand      string
-	videoCommand      string
-	frameCommand      string
-	archiveCommand    string
-	moderationCommand string
-	maxArchiveDepth   int
-	maxArchiveFiles   int
-	maxArchiveBytes   int64
-	maxImagePixels    int64
-	blockedMIMETypes  []string
+	enabled             bool
+	workerCount         int
+	pollInterval        time.Duration
+	timeout             time.Duration
+	fileCommand         string
+	antivirusCommand    string
+	imageCommand        string
+	videoCommand        string
+	frameCommand        string
+	archiveCommand      string
+	moderationCommand   string
+	maxArchiveDepth     int
+	maxArchiveFiles     int
+	maxArchiveBytes     int64
+	maxImagePixels      int64
+	blockedMIMETypes    []string
+	postControllerURL   string
+	postControllerToken string
 }
 
 func (c Config) Server() ServerConfig              { return c.server }
@@ -130,3 +135,7 @@ func (c ScannerConfig) MaxImagePixels() int64       { return c.maxImagePixels }
 func (c ScannerConfig) BlockedMIMETypes() []string {
 	return append([]string(nil), c.blockedMIMETypes...)
 }
+func (c Config) PostControllerURL() string           { return c.postControllerURL }
+func (c Config) PostControllerToken() string         { return c.postControllerToken }
+func (c Config) PostControllerBaseURL() string       { return c.postControllerURL }
+func (c Config) RegistrationConfirmationURL() string { return c.registrationConfirmationURL }

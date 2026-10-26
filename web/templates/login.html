@@ -15,6 +15,10 @@
       </div>
     {% endif %}
 
+    {% if registration_pending %}
+      <div class="alert alert--success">{{ t("registration_pending") }}</div>
+    {% endif %}
+
     {# Expired token notice (?expired=1 parameter) #}
     {% if expired %}
       <div class="alert alert--warning">

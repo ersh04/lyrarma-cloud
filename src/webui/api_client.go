@@ -45,6 +45,7 @@ func (h *Handler) internalRequest(c fiber.Ctx, method, target string, body io.Re
 	request.Header.Del(fiber.HeaderCookie)
 	request.Header.Del(fiber.HeaderAuthorization)
 	request.Header.Del(fiber.HeaderContentLength)
+	request.Header.Set(fiber.HeaderAcceptLanguage, h.requestLanguage(c))
 	if contentType != "" {
 		request.Header.SetContentType(contentType)
 	}

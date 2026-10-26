@@ -68,7 +68,7 @@ def assess_detections(detections, threshold, classes):
 def detect_frame(detector, frame, options):
     import numpy
 
-    # Приводим кадр к формату BGR, который NudeNet получает при чтении через OpenCV
+    # Convert the frame to the BGR format NudeNet receives when reading through OpenCV
     rgb = frame.convert("RGB")
     rgb.thumbnail((1280, 1280))
     bgr = numpy.ascontiguousarray(numpy.asarray(rgb)[:, :, ::-1])

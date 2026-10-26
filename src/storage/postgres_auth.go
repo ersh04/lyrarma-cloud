@@ -135,7 +135,7 @@ func (s *UserStore) init() error {
 	if columns != "email,id,password,plan,username" {
 		return fmt.Errorf("authentication users table must contain only id, username, password, email and plan columns; got %q", columns)
 	}
-	return nil
+	return s.initPendingRegistrations(ctx)
 }
 
 // Close closes the user database connection

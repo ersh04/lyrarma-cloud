@@ -97,7 +97,7 @@ func TestRegistrationOptionalBetaKey(t *testing.T) {
 				t.Fatalf("status=%d, API calls=%d; want status=%d, API calls=%d", response.StatusCode, apiCalls, test.wantStatus, test.wantAPICalls)
 			}
 			if response.StatusCode == 302 {
-				if location := response.Header.Get("Location"); location != "/login?registered=1" {
+				if location := response.Header.Get("Location"); location != "/login?registration_pending=1" {
 					t.Errorf("unexpected registration redirect: %q", location)
 				}
 			} else {
@@ -108,6 +108,79 @@ func TestRegistrationOptionalBetaKey(t *testing.T) {
 				if shown := strings.Contains(string(body), `id="beta_key"`); shown != required {
 					t.Errorf("beta-key field on error shown=%t, want %t", shown, required)
 				}
+			}
+		})
+	}
+}
+
+func TestPendingRegistrationNotice(t *testing.T) {
+	app := fiber.New()
+	_, err := New(app, Config{
+		TemplatesDir: "../../web/templates", TranslationsFile: "../../web/static/translations.json",
+		AuthCookieName: "auth-session",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for language, notice := range map[string]string{
+		"ru": "Заявка на регистрацию создана", "en": "Your registration request has been created",
+	} {
+		t.Run(language, func(t *testing.T) {
+			request := httptest.NewRequest("GET", "/login?registration_pending=1", nil)
+			request.Header.Set("Cookie", "lyrarma_lang="+language)
+			response, err := app.Test(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != 200 || !strings.Contains(string(body), notice) {
+				t.Error("missing localized pending registration notice")
+			}
+			for _, falseNotice := range []string{"Аккаунт создан!", "Account created!"} {
+				if strings.Contains(string(body), falseNotice) {
+					t.Error("pending registration must not be described as an active account")
+				}
+			}
+		})
+	}
+}
+
+func TestRegistrationEmailLanguageForwarding(t *testing.T) {
+	for _, language := range []string{"ru", "en"} {
+		t.Run(language, func(t *testing.T) {
+			app := fiber.New()
+			forwarded := ""
+			app.Post("/api/auth/register", func(c fiber.Ctx) error {
+				forwarded = c.Get(fiber.HeaderAcceptLanguage)
+				return c.SendStatus(fiber.StatusCreated)
+			})
+			_, err := New(app, Config{
+				TemplatesDir: "../../web/templates", TranslationsFile: "../../web/static/translations.json",
+				AuthCookieName: "auth-session",
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{
+				"username": {"alice"}, "email": {"alice@example.test"},
+				"password": {"test-password"}, "password_confirm": {"test-password"},
+				"privacy_policy_accepted": {"true"}, "id_policy_accepted": {"true"},
+			}
+			request := httptest.NewRequest("POST", "/register", strings.NewReader(form.Encode()))
+			request.Header.Set(fiber.HeaderContentType, "application/x-www-form-urlencoded")
+			request.Header.Set(fiber.HeaderCookie, "lyrarma_lang="+language)
+			request.Header.Set(fiber.HeaderAcceptLanguage, "fr-FR")
+			response, err := app.Test(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != 302 || forwarded != language {
+				t.Fatalf("registration must forward the selected interface language: status=%d language=%q", response.StatusCode, forwarded)
 			}
 		})
 	}

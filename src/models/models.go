@@ -5,7 +5,7 @@ package models
 import "time"
 
 // ─────────────────────────────────────────────
-//  User
+//  region User
 // ─────────────────────────────────────────────
 
 // User represents authentication data for a registered user
@@ -68,8 +68,14 @@ type LoginResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type ConfirmationRegistrationRequest struct {
+	Email   string `json:"to"`
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
+}
+
 // ─────────────────────────────────────────────
-//  File
+//  region File
 // ─────────────────────────────────────────────
 
 // FileEntry contains metadata for one stored file
@@ -122,7 +128,7 @@ type FileListResponse struct {
 }
 
 // ─────────────────────────────────────────────
-//  Folders
+//  region Folders
 // ─────────────────────────────────────────────
 
 // FolderEntry contains stored folder metadata. Folders may contain files and nested folders
@@ -156,7 +162,7 @@ type FolderListResponse struct {
 }
 
 // ─────────────────────────────────────────────
-//  Standard HTTP responses
+//  region Standard HTTP responses
 // ─────────────────────────────────────────────
 
 // ErrorResponse is the standard error response format

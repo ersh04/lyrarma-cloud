@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -11,53 +12,56 @@ import (
 )
 
 const (
-	configFileEnv            = "CONFIG_FILE"
-	serverAddressEnv         = "SERVER_ADDRESS"
-	serverReadTimeoutEnv     = "SERVER_READ_TIMEOUT"
-	serverWriteTimeoutEnv    = "SERVER_WRITE_TIMEOUT"
-	webStaticDirEnv          = "WEB_STATIC_DIR"
-	webIconsDirEnv           = "WEB_ICONS_DIR"
-	webTemplatesDirEnv       = "WEB_TEMPLATES_DIR"
-	webTranslationsFileEnv   = "WEB_TRANSLATIONS_FILE"
-	betaTestKeyEnv           = "BETA_TEST_KEY"
-	sessionCookieNameEnv     = "SESSION_COOKIE_NAME"
-	sessionCookiePathEnv     = "SESSION_COOKIE_PATH"
-	sessionCookieHTTPOnlyEnv = "SESSION_COOKIE_HTTP_ONLY"
-	sessionCookieSecureEnv   = "SESSION_COOKIE_SECURE"
-	sessionCookieSameSiteEnv = "SESSION_COOKIE_SAME_SITE"
-	databaseURLEnv           = "DATABASE_URL"
-	usersDatabaseURLEnv      = "USERS_DATABASE_URL"
-	cloudDataDirEnv          = "DATA_DIR"
-	cloudJWTSecretEnv        = "JWT_SECRET"
-	cloudJWTTokenTTLEnv      = "JWT_TTL"
-	hardMaxUploadMBEnv       = "MAX_UPLOAD_MB"
-	hardMaxStorageMBEnv      = "MAX_STORAGE_MB"
-	defaultUserPlanEnv       = "DEFAULT_USER_PLAN"
-	userPlansJSONEnv         = "USER_PLANS_JSON"
-	s3BucketEnv              = "S3_BUCKET"
-	s3QuarantineBucketEnv    = "S3_QUARANTINE_BUCKET"
-	s3RegionEnv              = "AWS_REGION"
-	s3EndpointEnv            = "S3_ENDPOINT"
-	s3AccessKeyIDEnv         = "AWS_ACCESS_KEY_ID"
-	s3SecretAccessKeyEnv     = "AWS_SECRET_ACCESS_KEY"
-	s3UsePathStyleEnv        = "S3_USE_PATH_STYLE"
-	scannerEnabledEnv        = "SCANNER_ENABLED"
-	scannerWorkersEnv        = "SCANNER_WORKERS"
-	scannerPollIntervalEnv   = "SCANNER_POLL_INTERVAL"
-	scannerTimeoutEnv        = "SCANNER_TIMEOUT"
-	scannerFileCommandEnv    = "SCANNER_FILE_COMMAND"
-	scannerAntivirusEnv      = "SCANNER_ANTIVIRUS_COMMAND"
-	scannerImageCommandEnv   = "SCANNER_IMAGE_COMMAND"
-	scannerVideoCommandEnv   = "SCANNER_VIDEO_COMMAND"
-	scannerFrameCommandEnv   = "SCANNER_FRAME_COMMAND"
-	scannerArchiveCommandEnv = "SCANNER_ARCHIVE_COMMAND"
-	scannerModerationEnv     = "SCANNER_MODERATION_COMMAND"
-	scannerArchiveDepthEnv   = "SCANNER_MAX_ARCHIVE_DEPTH"
-	scannerArchiveFilesEnv   = "SCANNER_MAX_ARCHIVE_FILES"
-	scannerArchiveSizeMBEnv  = "SCANNER_MAX_ARCHIVE_MB"
-	scannerMaxImagePixelsEnv = "SCANNER_MAX_IMAGE_PIXELS"
-	scannerBlockedMIMEsEnv   = "SCANNER_BLOCKED_MIME_TYPES"
-	mebibyte                 = int64(1024 * 1024)
+	configFileEnv                  = "CONFIG_FILE"
+	serverAddressEnv               = "SERVER_ADDRESS"
+	serverReadTimeoutEnv           = "SERVER_READ_TIMEOUT"
+	serverWriteTimeoutEnv          = "SERVER_WRITE_TIMEOUT"
+	webStaticDirEnv                = "WEB_STATIC_DIR"
+	webIconsDirEnv                 = "WEB_ICONS_DIR"
+	webTemplatesDirEnv             = "WEB_TEMPLATES_DIR"
+	webTranslationsFileEnv         = "WEB_TRANSLATIONS_FILE"
+	betaTestKeyEnv                 = "BETA_TEST_KEY"
+	postControllerBaseURLEnv       = "POST_CONTROLLER_BASE_URL"
+	postControllerTokenEnv         = "POST_CONTROLLER_TOKEN"
+	registrationConfirmationURLEnv = "REGISTRATION_CONFIRMATION_URL"
+	sessionCookieNameEnv           = "SESSION_COOKIE_NAME"
+	sessionCookiePathEnv           = "SESSION_COOKIE_PATH"
+	sessionCookieHTTPOnlyEnv       = "SESSION_COOKIE_HTTP_ONLY"
+	sessionCookieSecureEnv         = "SESSION_COOKIE_SECURE"
+	sessionCookieSameSiteEnv       = "SESSION_COOKIE_SAME_SITE"
+	databaseURLEnv                 = "DATABASE_URL"
+	usersDatabaseURLEnv            = "USERS_DATABASE_URL"
+	cloudDataDirEnv                = "DATA_DIR"
+	cloudJWTSecretEnv              = "JWT_SECRET"
+	cloudJWTTokenTTLEnv            = "JWT_TTL"
+	hardMaxUploadMBEnv             = "MAX_UPLOAD_MB"
+	hardMaxStorageMBEnv            = "MAX_STORAGE_MB"
+	defaultUserPlanEnv             = "DEFAULT_USER_PLAN"
+	userPlansJSONEnv               = "USER_PLANS_JSON"
+	s3BucketEnv                    = "S3_BUCKET"
+	s3QuarantineBucketEnv          = "S3_QUARANTINE_BUCKET"
+	s3RegionEnv                    = "AWS_REGION"
+	s3EndpointEnv                  = "S3_ENDPOINT"
+	s3AccessKeyIDEnv               = "AWS_ACCESS_KEY_ID"
+	s3SecretAccessKeyEnv           = "AWS_SECRET_ACCESS_KEY"
+	s3UsePathStyleEnv              = "S3_USE_PATH_STYLE"
+	scannerEnabledEnv              = "SCANNER_ENABLED"
+	scannerWorkersEnv              = "SCANNER_WORKERS"
+	scannerPollIntervalEnv         = "SCANNER_POLL_INTERVAL"
+	scannerTimeoutEnv              = "SCANNER_TIMEOUT"
+	scannerFileCommandEnv          = "SCANNER_FILE_COMMAND"
+	scannerAntivirusEnv            = "SCANNER_ANTIVIRUS_COMMAND"
+	scannerImageCommandEnv         = "SCANNER_IMAGE_COMMAND"
+	scannerVideoCommandEnv         = "SCANNER_VIDEO_COMMAND"
+	scannerFrameCommandEnv         = "SCANNER_FRAME_COMMAND"
+	scannerArchiveCommandEnv       = "SCANNER_ARCHIVE_COMMAND"
+	scannerModerationEnv           = "SCANNER_MODERATION_COMMAND"
+	scannerArchiveDepthEnv         = "SCANNER_MAX_ARCHIVE_DEPTH"
+	scannerArchiveFilesEnv         = "SCANNER_MAX_ARCHIVE_FILES"
+	scannerArchiveSizeMBEnv        = "SCANNER_MAX_ARCHIVE_MB"
+	scannerMaxImagePixelsEnv       = "SCANNER_MAX_IMAGE_PIXELS"
+	scannerBlockedMIMEsEnv         = "SCANNER_BLOCKED_MIME_TYPES"
+	mebibyte                       = int64(1024 * 1024)
 )
 
 const (
@@ -139,9 +143,12 @@ func Load() (Config, error) {
 				"application/vnd.microsoft.portable-executable",
 			},
 		},
-		databaseURL: value(values, databaseURLEnv, ""),
-		usersDBURL:  value(values, usersDatabaseURLEnv, ""),
-		betaTestKey: value(values, betaTestKeyEnv, ""),
+		databaseURL:                 value(values, databaseURLEnv, ""),
+		usersDBURL:                  value(values, usersDatabaseURLEnv, ""),
+		betaTestKey:                 value(values, betaTestKeyEnv, ""),
+		postControllerURL:           value(values, postControllerBaseURLEnv, ""),
+		postControllerToken:         value(values, postControllerTokenEnv, ""),
+		registrationConfirmationURL: value(values, registrationConfirmationURLEnv, ""),
 	}
 
 	if cfg.server.readTimeout, err = positiveDurationValue(values, serverReadTimeoutEnv, cfg.server.readTimeout); err != nil {
@@ -189,7 +196,7 @@ func Load() (Config, error) {
 	if cfg.scanner.maxImagePixels, err = positiveInt64Value(values, scannerMaxImagePixelsEnv, cfg.scanner.maxImagePixels); err != nil {
 		return Config{}, err
 	}
-	// Явно пустое значение отключает запрет типов, отсутствие настройки сохраняет встроенный список
+	// An explicitly empty value disables the MIME denylist; an absent setting preserves the built-in list
 	rawBlockedMIMEs, blockedMIMEsConfigured := os.LookupEnv(scannerBlockedMIMEsEnv)
 	if !blockedMIMEsConfigured {
 		rawBlockedMIMEs, blockedMIMEsConfigured = values[scannerBlockedMIMEsEnv]
@@ -298,6 +305,12 @@ func mebibytesValue(parsed int64, name string) (int64, error) {
 }
 
 func validateConfig(cfg Config) error {
+	if cfg.registrationConfirmationURL != "" {
+		link, err := url.Parse(cfg.registrationConfirmationURL)
+		if err != nil || (link.Scheme != "https" && link.Scheme != "http") || link.Hostname() == "" || link.User != nil || link.Fragment != "" {
+			return fmt.Errorf("%s must be an absolute HTTP(S) URL without credentials or a fragment", registrationConfirmationURLEnv)
+		}
+	}
 	if strings.TrimSpace(cfg.databaseURL) == "" {
 		return fmt.Errorf("%s is required", databaseURLEnv)
 	}

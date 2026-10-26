@@ -1,14 +1,150 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/lyrarma/cloud-api/src/models"
+	"github.com/lyrarma/cloud-api/src/storage"
+	"golang.org/x/crypto/bcrypt"
 )
+
+type pendingRegistrationStore struct {
+	requests []models.PendingRegistration
+	err      error
+}
+
+func (s *pendingRegistrationStore) CreatePendingRegistration(request models.PendingRegistration) error {
+	s.requests = append(s.requests, request)
+	return s.err
+}
+
+func (s *pendingRegistrationStore) GetUserByUsername(string) (models.User, error) {
+	return models.User{}, storage.ErrUserNotFound
+}
+
+func (s *pendingRegistrationStore) ConfirmRegistration(string) (models.User, error) {
+	return models.User{}, storage.ErrRegistrationNotFound
+}
+
+func TestRegisterCreatesOnlyPendingRegistration(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "created", status: 201},
+		{name: "username conflict", err: storage.ErrUserAlreadyExists, status: 409, code: "user_exists"},
+		{name: "email conflict", err: storage.ErrEmailAlreadyUsed, status: 409, code: "email_exists"},
+		{name: "database error", err: errors.New("database unavailable"), status: 500, code: "internal_error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &pendingRegistrationStore{err: test.err}
+			var logs bytes.Buffer
+			handler := &AuthHandler{userStore: store, defaultPlan: "user", logger: slog.New(slog.NewTextHandler(&logs, nil))}
+			app := fiber.New(fiber.Config{StreamRequestBody: true})
+			app.Post("/register", handler.Register)
+			app.Post("/login", handler.Login)
+			payload := `{"username":" alice ","email":" Alice@Example.COM ","password":"test-password","privacy_policy_accepted":true,"id_policy_accepted":true}`
+			request := httptest.NewRequest("POST", "/register", strings.NewReader(payload))
+			request.Header.Set("Content-Type", "application/json")
+			before := time.Now().UTC()
+			response, err := app.Test(request, fiber.TestConfig{Timeout: 10 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body map[string]any
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != test.status || (test.code != "" && body["error"] != test.code) {
+				t.Fatalf("status=%d body=%v", response.StatusCode, body)
+			}
+			if len(store.requests) != 1 {
+				t.Fatalf("got %d pending registration writes", len(store.requests))
+			}
+			pending := store.requests[0]
+			if pending.Username != "alice" || pending.Email != "alice@example.com" || len(pending.Plan) != 1 || pending.Plan[0] != "user" {
+				t.Fatal("pending registration identity or plan is incorrect")
+			}
+			if pending.CreatedAt.Before(before) || pending.CreatedAt.After(time.Now().UTC()) || pending.ExpiresAt.Sub(pending.CreatedAt) != 24*time.Hour {
+				t.Fatal("incorrect pending registration lifetime")
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(pending.PasswordHash), []byte("test-password")); err != nil {
+				t.Fatal("pending registration does not contain the password hash")
+			}
+			key, err := hex.DecodeString(pending.ConfirmationKey)
+			if err != nil || len(key) != 32 {
+				t.Fatal("confirmation key must contain 32 random bytes encoded as hexadecimal")
+			}
+			encodedBody, _ := json.Marshal(body)
+			encodedPending, _ := json.Marshal(pending)
+			for _, secret := range []string{pending.ConfirmationKey, pending.PasswordHash, "test-password"} {
+				if strings.Contains(string(encodedBody), secret) || strings.Contains(logs.String(), secret) || strings.Contains(string(encodedPending), secret) {
+					t.Fatal("registration secret exposed in a response, log or JSON encoding")
+				}
+			}
+			if test.err == nil {
+				if body["message"] != "registration pending confirmation" {
+					t.Fatalf("unexpected registration response: %v", body)
+				}
+				login := httptest.NewRequest("POST", "/login", strings.NewReader(`{"username":"alice","password":"test-password"}`))
+				login.Header.Set("Content-Type", "application/json")
+				loginResponse, err := app.Test(login)
+				if err != nil {
+					t.Fatal(err)
+				}
+				loginResponse.Body.Close()
+				if loginResponse.StatusCode != 401 {
+					t.Fatal("a pending registration must not be able to sign in")
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateRegistrationKey(t *testing.T) {
+	seen := make(map[string]bool)
+	for range 32 {
+		key, err := generateRegistrationKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := hex.DecodeString(key)
+		if err != nil || len(decoded) != 32 || seen[key] {
+			t.Fatal("confirmation keys must be unique, URL-safe 256-bit values")
+		}
+		seen[key] = true
+	}
+}
+
+func TestConfirmRegistrationMissingKey(t *testing.T) {
+	handler := &AuthHandler{userStore: &pendingRegistrationStore{}}
+	app := fiber.New()
+	app.Get("/confirm-registration", handler.ConfirmRegistration)
+	response, err := app.Test(httptest.NewRequest("GET", "/confirm-registration", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body models.ErrorResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != 404 || body.Error != "confirmation_invalid" {
+		t.Fatalf("unexpected confirmation result: status=%d body=%v", response.StatusCode, body)
+	}
+}
 
 func TestRegisterOptionalBetaKey(t *testing.T) {
 	const key = "0123456789abcdef"

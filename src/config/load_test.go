@@ -34,6 +34,93 @@ func TestLoadBuildsValidatedImmutableLimits(t *testing.T) {
 	}
 }
 
+func TestLoadPostController(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		fileContent string
+		envURL      string
+		envToken    string
+		wantURL     string
+		wantToken   string
+	}{
+		{name: "optional defaults"},
+		{name: "explicit empty values", fileContent: "POST_CONTROLLER_BASE_URL=\"\"\nPOST_CONTROLLER_TOKEN=\"\"\n"},
+		{name: "environment", envURL: "https://post.example.test/api", envToken: "test-secret", wantURL: "https://post.example.test/api", wantToken: "test-secret"},
+		{name: "dotenv", fileContent: "POST_CONTROLLER_BASE_URL=\"https://post.example.test/api\"\nPOST_CONTROLLER_TOKEN=\"file-secret\"\n", wantURL: "https://post.example.test/api", wantToken: "file-secret"},
+		{name: "environment overrides file", fileContent: "POST_CONTROLLER_BASE_URL=https://file.example.test\nPOST_CONTROLLER_TOKEN=file-secret\n", envURL: "https://env.example.test", envToken: "env-secret", wantURL: "https://env.example.test", wantToken: "env-secret"},
+		{name: "empty environment falls back to file", fileContent: "POST_CONTROLLER_BASE_URL=https://file.example.test\nPOST_CONTROLLER_TOKEN=file-secret\n", envURL: " \t ", envToken: " ", wantURL: "https://file.example.test", wantToken: "file-secret"},
+		{name: "trims surrounding whitespace", envURL: " https://post.example.test/api/ ", envToken: " test-secret ", wantURL: "https://post.example.test/api/", wantToken: "test-secret"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(postControllerBaseURLEnv, test.envURL)
+			t.Setenv(postControllerTokenEnv, test.envToken)
+			if err := os.WriteFile(os.Getenv(configFileEnv), []byte(test.fileContent), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.PostControllerBaseURL() != test.wantURL || cfg.PostControllerURL() != test.wantURL {
+				t.Error("unexpected post controller base URL")
+			}
+			if cfg.PostControllerToken() != test.wantToken {
+				t.Error("unexpected post controller token")
+			}
+			if err := os.Setenv(postControllerTokenEnv, "changed-after-load"); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.PostControllerToken() != test.wantToken {
+				t.Error("post controller settings must remain immutable after loading")
+			}
+		})
+	}
+}
+
+func TestLoadRegistrationConfirmationURL(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		envURL    string
+		fileURL   string
+		want      string
+		wantError bool
+	}{
+		{name: "optional default"},
+		{name: "environment", envURL: "https://cloud.example.test/confirm-registration", want: "https://cloud.example.test/confirm-registration"},
+		{name: "dotenv", fileURL: "https://cloud.example.test/confirm-registration", want: "https://cloud.example.test/confirm-registration"},
+		{name: "environment overrides file", envURL: "http://localhost:8080/confirm", fileURL: "https://file.example.test/confirm", want: "http://localhost:8080/confirm"},
+		{name: "query preserved", envURL: "https://cloud.example.test/confirm?source=email", want: "https://cloud.example.test/confirm?source=email"},
+		{name: "relative URL", envURL: "/confirm-registration", wantError: true},
+		{name: "missing host", envURL: "https:///confirm", wantError: true},
+		{name: "unsupported scheme", envURL: "javascript:alert(1)", wantError: true},
+		{name: "credentials", envURL: "https://user:password@cloud.example.test/confirm", wantError: true},
+		{name: "fragment", envURL: "https://cloud.example.test/confirm#section", wantError: true},
+		{name: "malformed URL", envURL: "https://%zz/confirm", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setValidEnvironment(t)
+			t.Setenv(registrationConfirmationURLEnv, test.envURL)
+			if err := os.WriteFile(os.Getenv(configFileEnv), []byte("REGISTRATION_CONFIRMATION_URL="+test.fileURL+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), registrationConfirmationURLEnv) {
+					t.Fatalf("expected confirmation URL validation error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.RegistrationConfirmationURL() != test.want {
+				t.Error("unexpected registration confirmation URL")
+			}
+		})
+	}
+}
+
 func TestLoadScannerEnabled(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -239,19 +326,22 @@ func setValidEnvironment(t *testing.T) {
 	}
 
 	values := map[string]string{
-		configFileEnv:         configPath,
-		scannerEnabledEnv:     "",
-		databaseURLEnv:        "postgres://localhost/test",
-		usersDatabaseURLEnv:   "postgres://localhost/lyrarma-services-users",
-		betaTestKeyEnv:        "0123456789abcdef",
-		cloudJWTSecretEnv:     "0123456789abcdef0123456789abcdef",
-		s3BucketEnv:           "test-bucket",
-		s3QuarantineBucketEnv: "test-quarantine-bucket",
-		s3RegionEnv:           "test-region",
-		hardMaxUploadMBEnv:    "20",
-		hardMaxStorageMBEnv:   "1000",
-		defaultUserPlanEnv:    "user",
-		userPlansJSONEnv:      "[{\"name\":\"user\",\"max_upload_mb\":5,\"max_storage_mb\":100},{\"name\":\"premium\",\"max_upload_mb\":10,\"max_storage_mb\":500},{\"name\":\"enterprise-v2\",\"max_upload_mb\":20,\"max_storage_mb\":1000}]",
+		registrationConfirmationURLEnv: "",
+		postControllerBaseURLEnv:       "",
+		postControllerTokenEnv:         "",
+		configFileEnv:                  configPath,
+		scannerEnabledEnv:              "",
+		databaseURLEnv:                 "postgres://localhost/test",
+		usersDatabaseURLEnv:            "postgres://localhost/lyrarma-services-users",
+		betaTestKeyEnv:                 "0123456789abcdef",
+		cloudJWTSecretEnv:              "0123456789abcdef0123456789abcdef",
+		s3BucketEnv:                    "test-bucket",
+		s3QuarantineBucketEnv:          "test-quarantine-bucket",
+		s3RegionEnv:                    "test-region",
+		hardMaxUploadMBEnv:             "20",
+		hardMaxStorageMBEnv:            "1000",
+		defaultUserPlanEnv:             "user",
+		userPlansJSONEnv:               "[{\"name\":\"user\",\"max_upload_mb\":5,\"max_storage_mb\":100},{\"name\":\"premium\",\"max_upload_mb\":10,\"max_storage_mb\":500},{\"name\":\"enterprise-v2\",\"max_upload_mb\":20,\"max_storage_mb\":1000}]",
 	}
 	for name, value := range values {
 		t.Setenv(name, value)
